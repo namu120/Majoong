@@ -10,7 +10,7 @@
 | `server/public/index.html` | 탑승자 모바일 웹 (설치 없이 초대 링크로 열림) | 동작 |
 | `server/public/car.html`, `demo.html` | 차량 화면 **웹 프로토타입**과 시연 페이지 | 동작. 내비게이션·위치·기어·비상등은 모의 |
 | `vehicle-app/` | Pleos Connect 차량 앱 (Kotlin, Jetpack Compose) | 단위 테스트 11개 통과. Pleos Connect 에뮬레이터 v2.1.0에서 핵심 흐름 동작 확인 |
-| `apk/Majoong_마중_release.apk` | 서명된 release APK | 에뮬레이터에서 검증한 것과 같은 소스로 빌드 |
+| `apk/마중_마중_release.apk` | 서명된 release APK | 에뮬레이터에서 검증한 것과 같은 소스로 빌드 |
 
 시연 영상과 `demo.html`에서 보이는 차량 화면은 웹으로 만든 프로토타입입니다. 서버와 탑승자 웹, 그리고 만남 장소 변경 규칙(운전자 동의 → 내비 반영 성공 확인 → 양쪽 확정)은 실제로 동작하며, 내비게이션·차량 위치·기어·비상등은 모의 데이터입니다. 음성 안내는 소리 대신 화면 아래 자막으로 표시합니다.
 
@@ -74,7 +74,7 @@ Pleos Connect SDK는 `https://nexus-playground.pleos.ai/repository/maven-release
 
 ## APK
 
-`apk/Majoong_마중_release.apk` — 서명된 release 빌드입니다(minSdk 28, targetSdk 34).
+`apk/마중_마중_release.apk` — 서명된 release 빌드입니다(minSdk 28, targetSdk 34).
 
 - 위 "에뮬레이터에서 확인한 것"은 같은 소스의 debug 빌드로 확인했습니다. 이 release 파일 자체를 설치해 다시 확인하지는 않았습니다.
 - 첫 실행 때 위치 권한(`pleos.car.permission.FUSED_LOCATION`) 허용을 묻습니다. 허용해야 차량 위치가 공유됩니다.

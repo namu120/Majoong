@@ -9,8 +9,8 @@
 | `server/` | 동기화 서버 (Node 한 파일, 외부 의존성 없음) | 동작. 계약 테스트 5개 통과 |
 | `server/public/index.html` | 탑승자 모바일 웹 (설치 없이 초대 링크로 열림) | 동작 |
 | `server/public/car.html`, `demo.html` | 차량 화면 **웹 프로토타입**과 시연 페이지 | 동작. 내비게이션·위치·기어·비상등은 모의 |
-| `vehicle-app/` | Pleos Connect 차량 앱 (Kotlin, Jetpack Compose) | 빌드와 단위 테스트 10개 통과. 에뮬레이터 실행은 미검증 |
-| `apk/Majoong_마중_release.apk` | 서명된 release APK | 빌드 통과. 에뮬레이터 실행은 미검증 |
+| `vehicle-app/` | Pleos Connect 차량 앱 (Kotlin, Jetpack Compose) | 단위 테스트 11개 통과. Pleos Connect 에뮬레이터 v2.1.0에서 핵심 흐름 동작 확인 |
+| `apk/Majoong_마중_release.apk` | 서명된 release APK | 에뮬레이터에서 검증한 것과 같은 소스로 빌드 |
 
 시연 영상과 `demo.html`에서 보이는 차량 화면은 웹으로 만든 프로토타입입니다. 서버와 탑승자 웹, 그리고 만남 장소 변경 규칙(운전자 동의 → 내비 반영 성공 확인 → 양쪽 확정)은 실제로 동작하며, 내비게이션·차량 위치·기어·비상등은 모의 데이터입니다. 음성 안내는 소리 대신 화면 아래 자막으로 표시합니다.
 
@@ -55,13 +55,29 @@ Pleos Connect SDK는 `https://nexus-playground.pleos.ai/repository/maven-release
 - 차량 앱 대상 환경: Pleos Connect Emulator v2.1.0 이상 (Android API 34 시스템 이미지), 버추얼 콘솔
 - 화면 규격: 세로 한 창(split view) 840 × 1240을 기준으로 설계했고, 창 너비에 비례해 배치합니다. 예시 폼팩터는 2560 × 1440 화면에서 내비게이션과 나란히 놓인 형태입니다.
 - 사용 SDK와 권한: NaviHelper 3.0.5 (`NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`), FusedLocation 1.1.3 (`FUSED_LOCATION`), TextToSpeech 3.3.1 (`TTS_SERVICE`), SpeechToText 3.3.1 (`STT_SERVICE`), Vehicle 2.3.2 (`CAR_LIGHTS`, `CAR_DRIVE`)
-- **차량 앱은 아직 Pleos Connect 에뮬레이터에서 실행해 검증하지 못했습니다.** 에뮬레이터 검증(내비 반영 콜백, 주행 중 음성, 차량 신호 지원 여부)은 2차 개발 기간의 첫 과제입니다.
+- 에뮬레이터 실측: 화면 2560 × 1440 (160 dpi), 앱 영역 전체 창 1682 × 1210.
+
+### 에뮬레이터에서 확인한 것 (2026-11-15, Pleos Connect Emulator v2.1.0, debug 빌드)
+
+- 가족 선택 → `requestRoute` → 내비게이션이 실제로 안내를 시작 → 서버에 확정 반영 → 음성 안내
+- 이동 중 변경 요청 → 음성 질문 → 화면의 "네" → 내비 목적지 변경 → 양쪽 확정 (기어 D 상태에서)
+- FusedLocation 위치가 탑승자 쪽으로 전달되고, 내비가 주는 남은 거리·도착 예정·다음 회전이 함께 전달됨
+- 기어(P/D)와 방향지시등 상태 수신, 기어 D에서 출발 판정
+- 온디바이스 TTS 한국어 안내, 기어 D에서 STT 요청 수락
+- 만남 지점 150 m 이내에서 도착 근처 전환과 메모 음성 안내, "탑승 종료" 후 위치 삭제와 포그라운드 서비스 종료
+
+### 아직 확인하지 못한 것
+
+- 실제 음성 인식 결과("네"/"아니요"): 마이크 입력 없이 실행해 인식 내용은 검증하지 못했습니다. 무응답 처리와 화면 버튼 경로는 확인했습니다.
+- TTS 실제 소리(첫 음절 잘림, 내비 안내 음성과 겹칠 때의 동작)
+- 위치는 `adb emu geo fix`로, 기어는 버추얼 콘솔로 주입했습니다. 실제 주행 중 연속 이동은 검증하지 않았습니다.
 
 ## APK
 
 `apk/Majoong_마중_release.apk` — 서명된 release 빌드입니다(minSdk 28, targetSdk 34).
 
-- Pleos Connect SDK 실제 라이브러리에 맞춰 컴파일되고 단위 테스트를 통과했지만, **Pleos Connect 에뮬레이터에서 설치·실행해 보지는 못했습니다.**
+- 위 "에뮬레이터에서 확인한 것"은 같은 소스의 debug 빌드로 확인했습니다. 이 release 파일 자체를 설치해 다시 확인하지는 않았습니다.
+- 첫 실행 때 위치 권한(`pleos.car.permission.FUSED_LOCATION`) 허용을 묻습니다. 허용해야 차량 위치가 공유됩니다.
 - 서버 주소는 `http://10.0.2.2:8787`(에뮬레이터에서 본 개발 PC)로 빌드되어 있습니다. 실행하려면 개발 PC에서 `server/server.mjs`를 먼저 켭니다.
 - 차량 신호는 방향지시등과 기어(P 여부)만 연결했습니다. 비상등은 SDK에 전용 API가 없어 연결하지 않았고, 도어·좌석 신호를 이용한 종료 제안은 아직 구현하지 않았습니다(수동 "탑승 종료"로 동작).
 

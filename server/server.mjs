@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = process.env.DATA_FILE ?? path.join(DIR, 'data.json');
@@ -267,6 +268,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 const PORT = Number(process.env.PORT ?? 8787);
-const PUBLIC_URL = process.env.PUBLIC_URL ?? `http://localhost:${PORT}`;
+// QR 초대 링크에 들어가는 주소. localhost 로는 실제 휴대폰이 열 수 없으므로, 지정이 없으면 이 컴퓨터의 Wi-Fi(LAN) 주소를 쓴다.
+const lanIp = () => Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
+const PUBLIC_URL = process.env.PUBLIC_URL ?? `http://${lanIp() ?? 'localhost'}:${PORT}`;
 server.listen(PORT, () => console.log(`마중 서버 ${PUBLIC_URL}`));
 export { server };

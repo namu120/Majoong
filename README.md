@@ -9,8 +9,8 @@
 | `server/` | 동기화 서버 (Node 한 파일, 외부 의존성 없음) | 동작. 계약 테스트 5개 통과 |
 | `server/public/index.html` | 탑승자 모바일 웹 (설치 없이 초대 링크로 열림) | 동작 |
 | `server/public/car.html`, `demo.html` | 차량 화면 **웹 프로토타입**과 시연 페이지 | 동작. 내비게이션·위치·기어·비상등은 모의 |
-| `vehicle-app/` | Pleos Connect 차량 앱 (Kotlin, Jetpack Compose) | 개발 중. 아래 "차량 앱" 참고 |
-| `apk/` | 빌드된 APK | 아래 "APK" 참고 |
+| `vehicle-app/` | Pleos Connect 차량 앱 (Kotlin, Jetpack Compose) | 빌드와 단위 테스트 10개 통과. 에뮬레이터 실행은 미검증 |
+| `apk/Majoong_마중_release.apk` | 서명된 release APK | 빌드 통과. 에뮬레이터 실행은 미검증 |
 
 시연 영상과 `demo.html`에서 보이는 차량 화면은 웹으로 만든 프로토타입입니다. 서버와 탑승자 웹, 그리고 만남 장소 변경 규칙(운전자 동의 → 내비 반영 성공 확인 → 양쪽 확정)은 실제로 동작하며, 내비게이션·차량 위치·기어·비상등은 모의 데이터입니다. 음성 안내는 소리 대신 화면 아래 자막으로 표시합니다.
 
@@ -54,12 +54,16 @@ Pleos Connect SDK는 `https://nexus-playground.pleos.ai/repository/maven-release
 - 서버·탑승자 웹·시연 페이지: macOS, Node 22, Chrome에서 확인
 - 차량 앱 대상 환경: Pleos Connect Emulator v2.1.0 이상 (Android API 34 시스템 이미지), 버추얼 콘솔
 - 화면 규격: 세로 한 창(split view) 840 × 1240을 기준으로 설계했고, 창 너비에 비례해 배치합니다. 예시 폼팩터는 2560 × 1440 화면에서 내비게이션과 나란히 놓인 형태입니다.
-- 사용 SDK와 권한: NaviHelper 3.0.5 (`NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`), FusedLocation 1.1.2 (`FUSED_LOCATION`), TextToSpeech 3.3.1 (`TTS_SERVICE`), SpeechToText 3.3.1 (`STT_SERVICE`), Vehicle 2.3.2 (`CAR_LIGHTS`, `CAR_DRIVE`)
+- 사용 SDK와 권한: NaviHelper 3.0.5 (`NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`), FusedLocation 1.1.3 (`FUSED_LOCATION`), TextToSpeech 3.3.1 (`TTS_SERVICE`), SpeechToText 3.3.1 (`STT_SERVICE`), Vehicle 2.3.2 (`CAR_LIGHTS`, `CAR_DRIVE`)
 - **차량 앱은 아직 Pleos Connect 에뮬레이터에서 실행해 검증하지 못했습니다.** 에뮬레이터 검증(내비 반영 콜백, 주행 중 음성, 차량 신호 지원 여부)은 2차 개발 기간의 첫 과제입니다.
 
 ## APK
 
-`apk/` 폴더를 확인해 주세요. 파일이 있다면 빌드만 통과한 상태이며 에뮬레이터 실행 검증 전입니다.
+`apk/Majoong_마중_release.apk` — 서명된 release 빌드입니다(minSdk 28, targetSdk 34).
+
+- Pleos Connect SDK 실제 라이브러리에 맞춰 컴파일되고 단위 테스트를 통과했지만, **Pleos Connect 에뮬레이터에서 설치·실행해 보지는 못했습니다.**
+- 서버 주소는 `http://10.0.2.2:8787`(에뮬레이터에서 본 개발 PC)로 빌드되어 있습니다. 실행하려면 개발 PC에서 `server/server.mjs`를 먼저 켭니다.
+- 차량 신호는 방향지시등과 기어(P 여부)만 연결했습니다. 비상등은 SDK에 전용 API가 없어 연결하지 않았고, 도어·좌석 신호를 이용한 종료 제안은 아직 구현하지 않았습니다(수동 "탑승 종료"로 동작).
 
 ## 동작 규칙
 

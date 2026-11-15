@@ -18,10 +18,10 @@
 
     <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
 
-    <!-- TODO: 앱 아이콘(시안 A 또는 B)을 mipmap 에 넣고 application 에 android:icon 을 지정 -->
     <application
         android:name=".MajungApp"
         android:label="마중"
+        android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
         <!-- usesCleartextTraffic 은 로컬 개발 서버용. 배포 서버는 HTTPS 로 두고 false 로 바꾼다. -->

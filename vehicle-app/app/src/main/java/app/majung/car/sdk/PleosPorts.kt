@@ -3,117 +3,148 @@ package app.majung.car.sdk
 // ─────────────────────────────────────────────────────────────────────────────
 // Pleos Connect SDK 어댑터.
 //
-// ⚠ 이 파일은 컴파일해 보지 못했다. SDK 를 받을 수 없는 환경에서 공개 문서(2026-11-15)만 보고 썼다.
-//   [확인] = 문서의 코드 예시에 그대로 나온 호출
-//   [추정] = 문서에 이름만 있고 시그니처가 없는 호출 → Android Studio 자동완성 / API Reference 로 맞출 것
-//   import 가 빠진 SDK 타입은 IDE 의 자동 import 로 채운다(패키지 경로가 문서에 없음).
+// 시그니처는 실제 SDK 라이브러리(NaviHelper 3.0.5, FusedLocation 1.1.3, Vehicle 2.3.2, TextToSpeech·SpeechToText 3.3.1)를
+// 열어 확인했고 컴파일된다. 다만 **에뮬레이터에서 실행해 본 적은 없다.** 아래 "실행 검증 필요" 항목은 동작을 추정한 것이다.
+//
+// 실행 검증 필요
+//  - requestRoute 성공을 뜻하는 콜백이 onRoutingCompleted 인지 onDestinationChanged 인지 (둘 다 성공으로 받는다)
+//  - poiId 를 비워도 목적지가 설정되는지
+//  - 주행 규제 중 STT request() 가 허용되는지, ON_DEVICE 모드의 한국어 지원
+//  - 비상등 전용 API 가 SDK 에 없다 → 탑승자 화면의 비상등 표시는 지금 연결되지 않는다
 // ─────────────────────────────────────────────────────────────────────────────
 
+import ai.pleos.playground.location.fused.FusedLocation
+import ai.pleos.playground.location.fused.listener.FusedLocationListener
+import ai.pleos.playground.location.fused.model.LocationData
+import ai.pleos.playground.navi.constants.NaviErrorCode
+import ai.pleos.playground.navi.constants.TurnType
+import ai.pleos.playground.navi.data.DestinationArrivedInfo
+import ai.pleos.playground.navi.data.RouteInfo
+import ai.pleos.playground.navi.data.RouteStartInfo
+import ai.pleos.playground.navi.data.TBTInfo
+import ai.pleos.playground.navi.data.TripInfo
+import ai.pleos.playground.navi.helper.NaviHelper
+import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
+import ai.pleos.playground.stt.SpeechToText
+import ai.pleos.playground.stt.listener.ResultListener
+import ai.pleos.playground.tts.TextToSpeech
+import ai.pleos.playground.tts.listener.EventListener
+import ai.pleos.playground.tts.listener.OnInitializeListener
+import ai.pleos.playground.vehicle.Vehicle
+import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
+import ai.pleos.playground.vehicle.constant.control.VehicleGear
+import ai.pleos.playground.vehicle.listener.GearSelectionListener
+import ai.pleos.playground.vehicle.listener.TurnSignalStateListener
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import ai.pleos.playground.navi.constants.NaviErrorCode                      // [확인]
-import ai.pleos.playground.navi.data.RouteStartInfo                         // [확인]
-import ai.pleos.playground.navi.helper.NaviHelper                           // [확인]
-import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener     // [확인]
-import ai.pleos.playground.stt.SpeechToText                                 // [확인]
-import ai.pleos.playground.tts.TextToSpeech                                 // [확인]
-import ai.pleos.playground.tts.listener.OnInitializeListener                // [확인]
 import app.majung.car.core.Spot
 import app.majung.car.core.TurnSignal
+import java.util.Locale
+import ai.pleos.playground.stt.constant.ErrorType as SttError
+import ai.pleos.playground.stt.constant.Mode as SttMode
+import ai.pleos.playground.tts.constant.ErrorType as TtsError
+import ai.pleos.playground.tts.constant.Mode as TtsMode
 
 private const val TAG = "Majung"
 private val main = Handler(Looper.getMainLooper())
 
-// ── NaviHelper v3.0.5 ────────────────────────────────────────────────────────
-class PleosNavi(private val context: Context) : NaviPort {
-    private val navi = NaviHelper(context.applicationContext)                // [확인]
+// ── NaviHelper ───────────────────────────────────────────────────────────────
+class PleosNavi(context: Context) : NaviPort {
+    private val navi = NaviHelper(context.applicationContext)
     private var pending: ((Boolean) -> Unit)? = null
     private var timeout: Runnable? = null
+    private var remainingM: Int? = null
+    private var etaSec: Int? = null
+    private var nextTurn: String? = null
     override var onArrived: (() -> Unit)? = null
     override var onProgress: ((Int?, Int?, String?) -> Unit)? = null
 
-    private fun finish(ok: Boolean) = main.post {
-        timeout?.let(main::removeCallbacks); timeout = null
-        pending?.also { pending = null }?.invoke(ok)
+    private fun finish(ok: Boolean) {
+        main.post {
+            timeout?.let(main::removeCallbacks); timeout = null
+            pending?.also { pending = null }?.invoke(ok)
+        }
     }
+    private fun publish() { main.post { onProgress?.invoke(remainingM, etaSec, nextTurn) } }
 
-    // 리스너 인터페이스의 메서드는 문서에 3개만 예시로 나온다. 나머지는 IDE 의 "Implement members" 로 채우고
-    // 아래 주석의 연결만 해 주면 된다.
     private val listener = object : NaviHelperEventListener {
-        override fun onRouteStarted(routeStartInfo: RouteStartInfo) { Log.d(TAG, "onRouteStarted $routeStartInfo") }   // [확인]
-        // M1 검증: requestRoute 성공을 뜻하는 콜백이 onRoutingCompleted 인지 onDestinationChanged 인지 로그로 확인.
-        //          둘 다 온다면 먼저 온 쪽에서 finish(true) 가 한 번만 처리된다(pending 을 비우므로 안전).
-        override fun onRoutingCompleted() { Log.d(TAG, "onRoutingCompleted"); finish(true) }                           // [확인]
-        override fun onError(errorCode: NaviErrorCode) { Log.w(TAG, "navi onError $errorCode"); finish(false) }        // [확인]
-
-        // [추정] 아래는 문서에 콜백 이름만 있다. 시그니처를 맞춘 뒤 주석을 풀 것.
-        // override fun onDestinationChanged() { finish(true) }
-        // override fun onDestinationArrived(/* DestinationArrivedInfo? */) { main.post { onArrived?.invoke() } }
-        // override fun onRouteStateInfo(info: RouteStateInfo) { Log.d(TAG, "$info")  /* 남은 거리·시간 필드가 있으면 onProgress 로 */ }
-        // override fun onTBTInfo(info: TBTInfo) { Log.d(TAG, "$info")               /* 다음 회전 → onProgress(nextTurn) */ }
+        override fun onRouteStarted(routeStartInfo: RouteStartInfo) { Log.d(TAG, "onRouteStarted $routeStartInfo") }
+        // 먼저 온 쪽에서 한 번만 처리된다(finish 가 pending 을 비운다).
+        override fun onRoutingCompleted() { Log.d(TAG, "onRoutingCompleted"); finish(true) }
+        override fun onDestinationChanged() { Log.d(TAG, "onDestinationChanged"); finish(true) }
+        override fun onError(errorCode: NaviErrorCode) { Log.w(TAG, "navi onError $errorCode"); finish(false) }
+        override fun onDestinationArrived(info: DestinationArrivedInfo) { main.post { onArrived?.invoke() } }
+        // 남은 거리·도착 예정. 단위(m·초 추정)는 에뮬레이터 로그로 확인할 것.
+        override fun onTripInfo(info: TripInfo) { Log.d(TAG, "onTripInfo $info"); remainingM = info.distance; etaSec = info.eta; publish() }
+        override fun onTBTInfo(list: List<TBTInfo>) {
+            val t = list.firstOrNull() ?: return
+            val dir = when (t.type) {
+                TurnType.TURN_LEFT, TurnType.TURN_SHARP_L, TurnType.TURN_KEEP_L -> "좌회전"
+                TurnType.TURN_RIGHT, TurnType.TURN_SHARP_R, TurnType.TURN_KEEP_R -> "우회전"
+                TurnType.TURN_UTURN -> "유턴"
+                TurnType.TURN_STRAIGHT -> "직진"
+                else -> null
+            }
+            nextTurn = dir?.let { "${t.distance.toInt()} m 앞 $it" }; publish()
+        }
     }
 
     override fun start(onReady: (Boolean) -> Unit) {
-        navi.initialize(                                                     // [확인]
+        navi.initialize(
             onConnected = { navi.addListener(listener); main.post { onReady(true) } },
             onFailed = { t -> Log.e(TAG, "navi init failed", t); main.post { onReady(false) } },
         )
     }
 
     override fun requestRoute(spot: Spot, timeoutMs: Long, onResult: (Boolean) -> Unit) {
-        finish(false)                                                        // 이전 요청이 남아 있으면 실패로 닫는다
+        finish(false)                                    // 이전 요청이 남아 있으면 실패로 닫는다
         main.post {
             pending = onResult
             timeout = Runnable { Log.w(TAG, "route timeout"); finish(false) }.also { main.postDelayed(it, timeoutMs) }
-            // [확인] 문서 예시의 인자 이름 그대로. import 는 RouteInfo 자동완성으로.
-            navi.requestRoute(
-                RouteInfo(
-                    latitude = spot.lat, longitude = spot.lng,
-                    displayLatitude = null, displayLongitude = null,
-                    poiName = spot.name, poiId = "", poiSubId = "0",       // M1 검증: poiId 를 비워도 되는지
-                    address = spot.memo,
-                )
-            )
+            runCatching {
+                navi.requestRoute(RouteInfo(latitude = spot.lat, longitude = spot.lng, poiName = spot.name, poiId = "", poiSubId = "0", address = spot.memo))
+            }.onFailure { Log.e(TAG, "requestRoute", it); finish(false) }
         }
     }
 
-    override fun cancelRoute() { navi.cancelRoute() }                        // [확인]
-    override fun stop() { navi.removeListener(listener); navi.release() }    // [확인]
+    override fun cancelRoute() { runCatching { navi.cancelRoute() }; remainingM = null; etaSec = null; nextTurn = null }
+    override fun stop() { navi.removeListener(listener); navi.release() }
 }
 
-// ── FusedLocation v1.1.2 ─────────────────────────────────────────────────────
-class PleosLocation(private val context: Context) : LocationPort {
-    private val fused = FusedLocation(context.applicationContext)            // [확인]
+// ── FusedLocation ────────────────────────────────────────────────────────────
+class PleosLocation(context: Context) : LocationPort {
+    private val fused = FusedLocation(context.applicationContext)
     private var cb: ((Fix) -> Unit)? = null
+    private var initialized = false
 
-    private val listener = object : FusedLocationListener {                  // [확인] onChanged(LocationData?), onError(Exception)
+    private val listener = object : FusedLocationListener {
         override fun onChanged(location: LocationData?) {
-            location ?: return                                               // 위치를 쓸 수 없으면 null 이 온다
-            // [추정] 필드 이름. 문서에는 "latitude, longitude, altitude, heading, confidence, timestamp"가 있다고만 나온다.
-            val fix = Fix(location.latitude, location.longitude, location.heading?.toDouble(), location.timestamp)
+            location ?: return                               // 위치를 쓸 수 없으면 null 이 온다
+            val fix = Fix(location.latitude, location.longitude, location.heading.toDouble(), location.timestampMillis)
             main.post { cb?.invoke(fix) }
         }
         override fun onError(e: Exception) { Log.w(TAG, "location error", e) }
     }
 
     override fun start(onFix: (Fix) -> Unit): Boolean {
-        if (!fused.isSupported()) return false                               // [확인] 미지원이면 위치 기능을 숨긴다
-        fused.initialize()                                                   // [확인]
+        if (runCatching { fused.isSupported() }.getOrDefault(false).not()) return false     // 미지원이면 위치 기능을 숨긴다
+        if (!initialized) { fused.initialize(); initialized = true }
         cb = onFix
-        fused.registerFusedLocationCallback(listener)                        // [확인]
+        fused.registerFusedLocationCallback(listener)
         return true
     }
-    override fun stop() { cb = null; fused.unregisterFusedLocationCallback(listener); fused.release() }   // [확인]
-    // addProximityAlert 는 시그니처가 문서에 없어 쓰지 않았다. 근접 판정은 PickupMachine 이 좌표로 직접 한다(150 m).
+    override fun stop() { if (cb != null) { cb = null; runCatching { fused.unregisterFusedLocationCallback(listener) } } }
+    // 근접 판정은 PickupMachine 이 좌표로 직접 한다(150 m). addProximityAlert(ProximityAlertRequest, ProximityAlertListener) 로 바꿀 수 있다.
 }
 
-// ── TextToSpeech / SpeechToText v3.3.1 ───────────────────────────────────────
-class PleosVoice(private val context: Context) : VoicePort {
-    // ON_DEVICE: 네트워크·앱 등록이 필요 없어 변수가 가장 적다. 한국어 품질이 부족하면 HYBRID + 앱 등록으로 바꾼다.
-    private val tts = TextToSpeech(context.applicationContext, ai.pleos.playground.tts.constant.Mode.ON_DEVICE)   // [확인]
-    private val stt = SpeechToText(context.applicationContext, ai.pleos.playground.stt.constant.Mode.ON_DEVICE)   // [확인]
+// ── TextToSpeech / SpeechToText ──────────────────────────────────────────────
+class PleosVoice(context: Context) : VoicePort {
+    // ON_DEVICE: 네트워크·앱 등록이 필요 없다. 한국어 품질이 부족하면 HYBRID + registerApp 으로 바꾼다.
+    private val tts = TextToSpeech(context.applicationContext, TtsMode.ON_DEVICE)
+    private val stt = SpeechToText(context.applicationContext, SttMode.ON_DEVICE)
     private val queue = ArrayDeque<Pair<String, () -> Unit>>()
     private var speaking = false
     private var ttsReady = false
@@ -121,46 +152,54 @@ class PleosVoice(private val context: Context) : VoicePort {
     private var failed: (() -> Unit)? = null
     private var listenTimeout: Runnable? = null
 
-    private val ttsListener = object : ai.pleos.playground.tts.listener.EventListener {      // [추정] 패키지. 콜백 6개는 [확인]
+    private val ttsListener = object : EventListener {
         override fun onReady() = Unit
         override fun onStart() = Unit
         override fun onUpdatedRms(rms: Double) = Unit
         override fun onDone() { main.post { next() } }
         override fun onStop() { main.post { next() } }
-        override fun onError(errorType: ai.pleos.playground.tts.constant.ErrorType) { Log.w(TAG, "tts $errorType"); main.post { next() } }
+        override fun onError(errorType: TtsError) { Log.w(TAG, "tts $errorType"); main.post { next() } }
     }
-    private val sttListener = object : ai.pleos.playground.stt.listener.ResultListener {     // [추정] 패키지. 콜백 7개는 [확인]
+    private val sttListener = object : ResultListener {
         override fun onReady() = Unit
         override fun onStartedRecognition() = Unit
         override fun onUpdated(stt: String, completed: Boolean) { if (completed) main.post { endListen(stt) } }
         override fun onUpdatedEpdData(on: Long, off: Long) = Unit
         override fun onUpdatedRms(rms: Double) = Unit
         override fun onEndedRecognition() { main.postDelayed({ endListen(null) }, 300) }      // 최종 결과 없이 끝나면 실패
-        override fun onError(errorType: ai.pleos.playground.stt.constant.ErrorType) { Log.w(TAG, "stt $errorType"); main.post { endListen(null) } }
+        override fun onError(errorType: SttError) { Log.w(TAG, "stt $errorType"); main.post { endListen(null) } }
     }
 
     override fun start() {
-        tts.initialize(object : OnInitializeListener {                       // [확인]
+        tts.initialize(object : OnInitializeListener {
             override fun onSuccess() {
-                tts.addEventListener(ttsListener)                            // [확인]
-                // tts.setLocale(Locale.KOREA)                               // [추정] M1 검증: 한국어 지원·기본 로캘
+                tts.addEventListener(ttsListener)
+                runCatching { tts.setLocale(Locale.KOREA) }
+                // 오디오 포커스 가이드: 내비 안내·음악과 공존(duck)하는 안내 음성으로 분류한다.
+                runCatching {
+                    tts.setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                }
                 main.post { ttsReady = true; pump() }
             }
-            override fun onFailure(errorType: ai.pleos.playground.tts.constant.ErrorType) { Log.e(TAG, "tts init $errorType") }
+            override fun onFailure(errorType: TtsError) { Log.e(TAG, "tts init $errorType") }
         })
-        stt.initialize()                                                     // [추정] TTS 와 같은 형태일 것
-        stt.addListener(sttListener)                                         // [확인]
+        stt.initialize(object : ai.pleos.playground.stt.listener.OnInitializeListener {
+            override fun onSuccess() { stt.addListener(sttListener); runCatching { stt.setLocale(Locale.KOREA) } }
+            override fun onFailure(errorType: SttError) { Log.e(TAG, "stt init $errorType") }
+        })
     }
 
     override fun speak(text: String, onDone: () -> Unit) { main.post { queue.addLast(text to onDone); pump() } }
 
     private fun pump() {
-        if (speaking || !ttsReady) return
-        val (text, _) = queue.firstOrNull() ?: return
+        if (speaking) return
+        val head = queue.firstOrNull() ?: return
+        if (!ttsReady) { queue.removeFirst(); head.second(); pump(); return }      // TTS 를 못 쓰면 화면 안내만으로 흐름을 잇는다
         speaking = true
-        // 선행 묵음 가이드(150~200 ms): SDK 가 오디오 데이터를 내주지 않으므로 앱에서 무음을 붙일 수 없다.
-        // M1 검증: 첫 음절이 잘리는지 녹음으로 확인. 잘리면 사무국에 문의(직접 AudioTrack 재생은 범위 밖).
-        tts.speak(text)                                                      // [확인]
+        // 선행 묵음 가이드(150~200 ms): SDK 가 오디오 데이터를 내주지 않아 앱에서 무음을 붙일 수 없다. 첫 음절 잘림은 실행 검증 항목.
+        runCatching { tts.speak(head.first, true) }.onFailure { main.post { next() } }
     }
     private fun next() {
         if (!speaking) return
@@ -173,8 +212,7 @@ class PleosVoice(private val context: Context) : VoicePort {
         main.post {
             heard = onText; failed = onFail
             listenTimeout = Runnable { endListen(null) }.also { main.postDelayed(it, timeoutMs) }
-            // M1 검증: 기어 D(주행 규제 on)에서 request() 가 되는지. 안 되면 onError → 화면 버튼 또는 무응답 처리로 넘어간다.
-            runCatching { stt.request() }.onFailure { endListen(null) }      // [확인]
+            runCatching { stt.request() }.onFailure { endListen(null) }      // 실패하면 화면 버튼 또는 무응답 처리로 넘어간다
         }
     }
     private fun endListen(text: String?) {
@@ -182,39 +220,50 @@ class PleosVoice(private val context: Context) : VoicePort {
         if (ok == null && ng == null) return                                 // 이미 끝난 세션
         heard = null; failed = null
         listenTimeout?.let(main::removeCallbacks); listenTimeout = null
-        runCatching { stt.stop() }                                           // [확인] 마이크 반납
+        runCatching { stt.stop() }                                           // 마이크 반납
         if (text.isNullOrBlank()) ng?.invoke() else ok?.invoke(text)
     }
     override fun stopListening() { main.post { heard = null; failed = null; listenTimeout?.let(main::removeCallbacks); runCatching { stt.stop() } } }
 
     override fun stop() {
-        runCatching { tts.stop() }                                           // [확인]
-        tts.removeEventListener(ttsListener); tts.release()                  // [확인]
-        stt.removeListener(sttListener); stt.release()                       // [확인] removeListener / [추정] release
+        runCatching { tts.stop() }
+        tts.removeEventListener(ttsListener); tts.release()
+        stt.removeListener(sttListener); stt.release()
     }
 }
 
-// ── Vehicle v2.3.2 ───────────────────────────────────────────────────────────
-class PleosVehicle(private val context: Context) : VehiclePort {
-    private val vehicle = Vehicle(context.applicationContext)                // [확인]
+// ── Vehicle ──────────────────────────────────────────────────────────────────
+class PleosVehicle(context: Context) : VehiclePort {
+    private val vehicle = Vehicle(context.applicationContext)
+    private var turnListener: TurnSignalStateListener? = null
+    private var gearListener: GearSelectionListener? = null
 
+    /**
+     * SDK 에 주차 브레이크 API 는 없고(Brake 는 브레이크 페달만) 기어 API 가 있다 → 기어 P 를 "주차"로 본다.
+     * 비상등 전용 API 도 없어 onHazard 는 연결하지 않는다(탑승자 화면에서 숨겨진다).
+     * 종료 제안(onBoardingHint)은 Door·Seat(SeatOccupancy, SeatBeltBuckledState) 리스너로 구현할 수 있으나 아직 연결하지 않았다.
+     */
     override fun start(onHazard: (Boolean) -> Unit, onTurnSignal: (TurnSignal) -> Unit, onParkBrake: (Boolean) -> Unit, onBoardingHint: () -> Unit) {
-        vehicle.initialize()                                                 // [확인]
-        // 문서에 나온 것은 도메인 접근(getXxx)과 capability 패턴뿐이다:
-        //   val door = vehicle.getDoor()
-        //   door.checkDoorPositionCapabilities(onComplete = { config, areaMap -> config.accessType … }, onFailed = { e -> … })
-        // 아래 세 묶음은 같은 패턴으로 M1 에서 채운다. capability 가 READ 가 아니면 콜백을 아예 연결하지 않는다
-        // → 서버에 null 로 올라가고 탑승자 화면에서 해당 표시가 숨겨진다.
-        //
-        // 1) 비상등·방향지시등  (권한 CAR_LIGHTS)        vehicle.getTurnSignal() / vehicle.getLight()
-        //      → onTurnSignal(LEFT|RIGHT|OFF), onHazard(true|false)
-        //      ※ 비상등 전용 API 가 있는지 미확인. 없으면 좌·우가 동시에 켜진 상태를 비상등으로 본다.
-        // 2) 주차 브레이크      (권한 CAR_DRIVE)         vehicle.getBrake()
-        //      → onParkBrake(true|false)   출발 감지의 보조 신호
-        // 3) 종료 제안 (M3, 선택) 도어 열림→닫힘 뒤 새 좌석 착좌 또는 안전벨트 체결
-        //      vehicle.getDoor() / vehicle.getSeat() / vehicle.getSafety()
-        //      → onBoardingHint()   "픽업을 종료할까요?" 제안만 한다. 탑승 판정이 아니다.
-        Log.i(TAG, "Vehicle 신호 연결은 M1 검증 후 구현")
+        runCatching {
+            vehicle.initialize()
+            val turn = { v: TurnSignalValue? -> main.post { onTurnSignal(when (v) { TurnSignalValue.LEFT -> TurnSignal.LEFT; TurnSignalValue.RIGHT -> TurnSignal.RIGHT; else -> TurnSignal.OFF }) }; Unit }
+            val gear = { g: VehicleGear? -> main.post { onParkBrake(g == VehicleGear.GEAR_PARK) }; Unit }
+            vehicle.getTurnSignal().apply {
+                getCurrentTurnSignalState(turn) { Log.w(TAG, "turn signal 미지원", it) }
+                registerTurnSignalState(object : TurnSignalStateListener { override fun onTurnSignalStateUpdated(value: TurnSignalValue?) { turn(value) }; override fun onFailed(e: Exception) { Log.w(TAG, "vehicle listener", e) } }.also { turnListener = it })
+            }
+            vehicle.getGear().apply {
+                getCurrentGearSelectionState(gear) { Log.w(TAG, "gear 미지원", it) }
+                registerGearSelection(object : GearSelectionListener { override fun onSelected(value: VehicleGear?) { gear(value) }; override fun onFailed(e: Exception) { Log.w(TAG, "vehicle listener", e) } }.also { gearListener = it })
+            }
+        }.onFailure { Log.w(TAG, "Vehicle SDK 사용 불가", it) }
     }
-    override fun stop() { vehicle.release() }                                // [확인] 비동기 콜백이 끝난 뒤에 호출할 것
+
+    override fun stop() {
+        runCatching {
+            turnListener?.let { vehicle.getTurnSignal().unregisterTurnSignalState(it) }
+            gearListener?.let { vehicle.getGear().unregisterGearSelection(it) }
+            vehicle.release()
+        }
+    }
 }

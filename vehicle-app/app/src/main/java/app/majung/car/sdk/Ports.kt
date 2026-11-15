@@ -39,5 +39,7 @@ interface VoicePort {
     /** 한 번 듣는다. 최종 인식 결과는 onText, 오류·무음·시간 초과는 onFail. 둘 중 하나만 한 번 호출된다. */
     fun listen(timeoutMs: Long, onText: (String) -> Unit, onFail: () -> Unit)
     fun stopListening()
+    /** 아직 읽지 않은 안내를 버리고 읽던 것을 멈춘다(운전자가 이미 답한 질문이 뒤늦게 나오지 않게). */
+    fun flush()
     fun stop()
 }

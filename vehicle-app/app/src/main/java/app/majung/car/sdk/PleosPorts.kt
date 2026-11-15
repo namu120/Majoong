@@ -7,8 +7,7 @@ package app.majung.car.sdk
 // 열어 확인했고 컴파일된다. 다만 **에뮬레이터에서 실행해 본 적은 없다.** 아래 "실행 검증 필요" 항목은 동작을 추정한 것이다.
 //
 // 실행 검증 필요
-//  - requestRoute 성공을 뜻하는 콜백이 onRoutingCompleted 인지 onDestinationChanged 인지 (둘 다 성공으로 받는다)
-//  - poiId 를 비워도 목적지가 설정되는지
+//  (확인됨) requestRoute 는 poiId 를 비워도 목적지를 설정하고, 성공은 onRouteStarted 로 온다. 내비 앱이 앞으로 나온다.
 //  - 주행 규제 중 STT request() 가 허용되는지, ON_DEVICE 모드의 한국어 지원
 //  - 비상등 전용 API 가 SDK 에 없다 → 탑승자 화면의 비상등 표시는 지금 연결되지 않는다
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,15 +70,28 @@ class PleosNavi(context: Context) : NaviPort {
     private fun publish() { main.post { onProgress?.invoke(remainingM, etaSec, nextTurn) } }
 
     private val listener = object : NaviHelperEventListener {
-        override fun onRouteStarted(routeStartInfo: RouteStartInfo) { Log.d(TAG, "onRouteStarted $routeStartInfo") }
+        // 에뮬레이터 실측(2026-11-15): requestRoute 뒤에 onTBTInfo → onRouteStarted → onRouteEnded → onNavigationStatus(ROUTE_DRIVE)
+        // → onRouteStateInfo(naviMode=ROUTE_GUIDING) 순으로 온다. onRoutingCompleted·onDestinationChanged 는 오지 않았다.
+        // 내비 앱이 떠 있으면 약 19초, 꺼져 있으면 약 27초 걸렸다. distance 는 m, duration 은 초.
+        override fun onRouteStarted(routeStartInfo: RouteStartInfo) {
+            Log.d(TAG, "onRouteStarted $routeStartInfo")
+            remainingM = routeStartInfo.distance; etaSec = routeStartInfo.duration; publish()
+            finish(true)
+        }
+        override fun onRouteEnded() { Log.d(TAG, "onRouteEnded") }
+        override fun onRouteCancelled() { Log.d(TAG, "onRouteCancelled") }
+        override fun onNavigationStatus(status: ai.pleos.playground.navi.constants.NavigationStatus) { Log.d(TAG, "onNavigationStatus $status") }
+        override fun onRouteStateInfo(info: ai.pleos.playground.navi.data.RouteStateInfo) { Log.d(TAG, "onRouteStateInfo $info") }
+        override fun onDestinationInfo(info: ai.pleos.playground.navi.data.DestinationInfo) { Log.d(TAG, "onDestinationInfo $info") }
         // 먼저 온 쪽에서 한 번만 처리된다(finish 가 pending 을 비운다).
         override fun onRoutingCompleted() { Log.d(TAG, "onRoutingCompleted"); finish(true) }
         override fun onDestinationChanged() { Log.d(TAG, "onDestinationChanged"); finish(true) }
         override fun onError(errorCode: NaviErrorCode) { Log.w(TAG, "navi onError $errorCode"); finish(false) }
-        override fun onDestinationArrived(info: DestinationArrivedInfo) { main.post { onArrived?.invoke() } }
+        override fun onDestinationArrived(info: DestinationArrivedInfo) { Log.d(TAG, "onDestinationArrived $info"); main.post { onArrived?.invoke() } }
         // 남은 거리·도착 예정. 단위(m·초 추정)는 에뮬레이터 로그로 확인할 것.
         override fun onTripInfo(info: TripInfo) { Log.d(TAG, "onTripInfo $info"); remainingM = info.distance; etaSec = info.eta; publish() }
         override fun onTBTInfo(list: List<TBTInfo>) {
+            Log.d(TAG, "onTBTInfo $list")
             val t = list.firstOrNull() ?: return
             val dir = when (t.type) {
                 TurnType.TURN_LEFT, TurnType.TURN_SHARP_L, TurnType.TURN_KEEP_L -> "좌회전"
@@ -160,8 +172,10 @@ class PleosVoice(context: Context) : VoicePort {
         override fun onStop() { main.post { next() } }
         override fun onError(errorType: TtsError) { Log.w(TAG, "tts $errorType"); main.post { next() } }
     }
+    private var listenMs = 0L
     private val sttListener = object : ResultListener {
-        override fun onReady() = Unit
+        // 에뮬레이터 실측: request() 뒤 준비 완료까지 약 4초. 듣는 시간은 준비된 시점부터 센다.
+        override fun onReady() { main.post { if (heard != null) armListenTimeout(listenMs) } }
         override fun onStartedRecognition() = Unit
         override fun onUpdated(stt: String, completed: Boolean) { if (completed) main.post { endListen(stt) } }
         override fun onUpdatedEpdData(on: Long, off: Long) = Unit
@@ -211,9 +225,14 @@ class PleosVoice(context: Context) : VoicePort {
     override fun listen(timeoutMs: Long, onText: (String) -> Unit, onFail: () -> Unit) {
         main.post {
             heard = onText; failed = onFail
-            listenTimeout = Runnable { endListen(null) }.also { main.postDelayed(it, timeoutMs) }
+            listenMs = timeoutMs
+            armListenTimeout(timeoutMs + 8_000)                              // 준비 신호가 끝내 안 오는 경우의 상한
             runCatching { stt.request() }.onFailure { endListen(null) }      // 실패하면 화면 버튼 또는 무응답 처리로 넘어간다
         }
+    }
+    private fun armListenTimeout(ms: Long) {
+        listenTimeout?.let(main::removeCallbacks)
+        listenTimeout = Runnable { endListen(null) }.also { main.postDelayed(it, ms) }
     }
     private fun endListen(text: String?) {
         val ok = heard; val ng = failed
@@ -224,6 +243,8 @@ class PleosVoice(context: Context) : VoicePort {
         if (text.isNullOrBlank()) ng?.invoke() else ok?.invoke(text)
     }
     override fun stopListening() { main.post { heard = null; failed = null; listenTimeout?.let(main::removeCallbacks); runCatching { stt.stop() } } }
+
+    override fun flush() { main.post { queue.clear(); if (speaking) { speaking = false; runCatching { tts.stop() } } } }
 
     override fun stop() {
         runCatching { tts.stop() }

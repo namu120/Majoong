@@ -19,6 +19,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val c = (application as MajungApp).controller
+        // FUSED_LOCATION 은 실행 중 권한이다. 주차 중 첫 실행에서 한 번 묻고, 허용되면 진행 중인 픽업의 위치 공유를 바로 시작한다.
+        val ask = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { c.startLocation() }
+        val wanted = arrayOf("pleos.car.permission.FUSED_LOCATION", android.Manifest.permission.POST_NOTIFICATIONS)
+            .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) ask.launch(wanted.toTypedArray())
         setContent {
             val state by c.state.collectAsStateWithLifecycle()
             val home by c.home.collectAsStateWithLifecycle()

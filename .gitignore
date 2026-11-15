@@ -11,3 +11,4 @@ vehicle-app/.kotlin/
 *.jks
 *.keystore
 keystore.properties
+.idea/

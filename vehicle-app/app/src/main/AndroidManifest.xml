@@ -3,13 +3,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Pleos SDK 권한: 쓰는 것만 선언한다. 문자열은 각 SDK의 Declaring permissions 페이지 기준 -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />          <!-- get*Info() -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />   <!-- requestRoute() -->
-    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />   <!-- dangerous: 실행 중 요청 필요 (MainActivity) -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
     <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
     <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />          <!-- 비상등·방향지시등 -->
@@ -37,6 +37,9 @@
         </activity>
 
         <!-- 픽업이 진행 중일 때만 떠 있는 포그라운드 서비스. 종료·취소·만료 즉시 내린다(BG→CCH 가이드). -->
-        <service android:name=".PickupService" android:exported="false" android:foregroundServiceType="location" />
+        <!-- 위치는 Android 표준 권한이 아니라 Pleos FusedLocation 권한으로 받으므로 type=location 을 쓸 수 없다(Android 14 가 표준 위치 권한을 요구). -->
+        <service android:name=".PickupService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="진행 중인 픽업의 차량 위치 공유와 음성 안내" />
+        </service>
     </application>
 </manifest>

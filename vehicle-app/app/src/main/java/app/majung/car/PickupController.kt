@@ -141,7 +141,7 @@ class PickupController(
         when (fx) {
             is Effect.Speak -> voice.speak(fx.text) { if (fx.tag.isNotEmpty()) dispatch(Event.TtsDone(fx.tag)) }
             is Effect.Listen -> voice.listen(fx.timeoutMs, onText = { dispatch(Event.Heard(it)) }, onFail = { dispatch(Event.ListenFailed) })
-            Effect.StopListen -> voice.stopListening()
+            Effect.StopListen -> { voice.stopListening(); voice.flush() }
             is Effect.RequestRoute -> {
                 (location as? MockLocation)?.setTarget(fx.spot.lat, fx.spot.lng)
                 navi.requestRoute(fx.spot, fx.timeoutMs) { ok -> dispatch(if (ok) Event.RouteOk else Event.RouteFailed) }
@@ -179,19 +179,14 @@ class PickupController(
         if (p.status.isTerminal) {
             pollJob?.cancel(); lastRev = -1
             home.value = home.value.copy(boardingHint = false)
-            location.stop()
+            runCatching { location.stop() }; locating = false
             context.stopService(Intent(context, PickupService::class.java))      // 사용자에게 줄 기능이 없으면 FGS 를 내린다
             refreshHome()
         }
     }
 
     private fun beginPolling(pickupId: String) {
-        context.startForegroundService(Intent(context, PickupService::class.java))
-        if (!location.start { f ->
-                fix = f; dispatch(Event.Location(f.lat, f.lng))
-                val spot = state.value.pickup?.confirmedSpot
-                arrow.value = if (spot != null && f.heading != null) (Geo.bearing(f.lat, f.lng, spot.lat, spot.lng) - f.heading).toFloat() else null
-            }) Log.w("Majung", "FusedLocation 미지원 → 위치 공유 숨김")
+        runCatching { context.startForegroundService(Intent(context, PickupService::class.java)) }.onFailure { Log.e("Majung", "FGS 시작 실패", it) }
         pollJob?.cancel()
         pollJob = scope.launch {
             while (isActive) {
@@ -210,6 +205,22 @@ class PickupController(
                 }
             }
         }
+        startLocation()
+    }
+
+    private var locating = false
+    /** FUSED_LOCATION 은 실행 중 권한(dangerous)이다. 허용 전에는 위치 공유 없이 진행하고, 허용되면 다시 불린다. */
+    fun startLocation() {
+        if (locating || pollJob?.isActive != true) return      // 픽업 중에만 위치를 받는다
+        val granted = location is MockLocation || context.checkSelfPermission("pleos.car.permission.FUSED_LOCATION") == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) { Log.w("Majung", "FUSED_LOCATION 권한 없음 → 위치 공유 보류"); return }
+        val ok = runCatching { location.start { f -> onFix(f) } }.onFailure { Log.e("Majung", "location.start", it) }.getOrDefault(false)
+        if (ok) locating = true else Log.w("Majung", "FusedLocation 미지원 → 위치 공유 숨김")
+    }
+    private fun onFix(f: Fix) {
+        fix = f; dispatch(Event.Location(f.lat, f.lng))
+        val spot = state.value.pickup?.confirmedSpot
+        arrow.value = if (spot != null && f.heading != null) (Geo.bearing(f.lat, f.lng, spot.lat, spot.lng) - f.heading).toFloat() else null
     }
 
     private fun uploadCarState() {
@@ -248,8 +259,9 @@ class PickupService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("pickup", "픽업 진행", NotificationManager.IMPORTANCE_LOW))
-        startForeground(1, Notification.Builder(this, "pickup").setContentTitle("마중").setContentText("픽업 진행 중 · 위치 공유 중")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation).setOngoing(true).build())
+        val n = Notification.Builder(this, "pickup").setContentTitle("마중").setContentText("픽업 진행 중 · 위치 공유 중")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation).setOngoing(true).build()
+        if (android.os.Build.VERSION.SDK_INT >= 34) startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
         return START_NOT_STICKY
     }
 }

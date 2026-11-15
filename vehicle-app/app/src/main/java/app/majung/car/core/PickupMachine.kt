@@ -62,7 +62,7 @@ sealed interface Effect {
 
 object PickupMachine {
     const val LISTEN_MS = 6_000L
-    const val ROUTE_TIMEOUT_MS = 10_000L
+    const val ROUTE_TIMEOUT_MS = 45_000L      // 에뮬레이터 실측: 내비 앱이 꺼져 있으면 첫 콜백까지 27초 걸렸다
     const val NEAR_M = 150
 
     fun reduce(s: MachineState, e: Event): Pair<MachineState, List<Effect>> {
@@ -118,6 +118,10 @@ object PickupMachine {
         }
         var s = (if (s0.pickup != null && s0.pickup.pickupId != p.pickupId) MachineState(parked = s0.parked) else s0).copy(pickup = p)
 
+        // 앱이 픽업 도중 다시 시작된 경우: 확정 지점이 있으면 내비 안내는 이미 걸려 있다고 보고, 이미 전달된 준비 상태는 다시 읽지 않는다.
+        if (p.confirmedSpot != null && !s.routeActive) s = s.copy(routeActive = true)
+        if (s0.pickup == null && p.confirmedSpot != null) s = s.copy(announcedMemberSeq = p.member.seq, ackedLateSeq = p.member.seq)
+
         // 준비 상태: seq 가 올라갈 때 한 번만 읽는다.
         if (p.member.seq > s.announcedMemberSeq) {
             fx += Effect.Speak(Phrases.member(p.memberName, p.member))
@@ -141,7 +145,7 @@ object PickupMachine {
                 }
             }
         }
-        return s
+        return depart(s, fx, justConfirmed = false)
     }
 
     private fun accept(s: MachineState, seq: Int, fx: MutableList<Effect>): MachineState {

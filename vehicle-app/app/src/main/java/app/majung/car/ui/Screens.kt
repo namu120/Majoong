@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,8 +60,9 @@ object C {
 }
 
 /**
- * 시안은 840×1240 아트보드 기준 px 로 그려져 있다. 실제 창 크기·밀도는 에뮬레이터에서 확인 전이므로,
- * 창 너비를 840 으로 나눈 값을 1 단위(u)로 삼아 시안 수치를 그대로 쓴다. 사용자가 창 크기를 바꿔도 비율이 유지된다.
+ * 시안은 840×1240 아트보드 기준 px 로 그려져 있다. 에뮬레이터 실측: 화면 2560×1440(160dpi), 앱 영역 전체 창은 1682×1210,
+ * 다른 앱과 나란히 뜨면 절반 너비의 세로 창이 된다. 그래서 너비와 높이 둘 다에 들어가는 배율을 1 단위(u)로 삼고,
+ * 창이 넓으면 시안 너비(840u)의 열을 가운데에 둔다.
  */
 class Units(private val unit: Dp) {
     val Int.u: Dp get() = unit * this
@@ -69,9 +71,12 @@ class Units(private val unit: Dp) {
 val LocalUnits = compositionLocalOf { Units(1.dp) }
 
 @Composable
-fun Scaled(content: @Composable Units.() -> Unit) = BoxWithConstraints(Modifier.fillMaxSize().background(C.bg)) {
-    val units = Units(maxWidth / 840f)
-    CompositionLocalProvider(LocalUnits provides units) { units.content() }
+fun Scaled(content: @Composable Units.() -> Unit) = BoxWithConstraints(Modifier.fillMaxSize().background(C.bg), contentAlignment = Alignment.TopCenter) {
+    val unit = minOf(maxWidth / 840f, maxHeight / 1240f)
+    val units = Units(unit)
+    Box(Modifier.width(unit * 840).fillMaxHeight()) {
+        CompositionLocalProvider(LocalUnits provides units) { units.content() }
+    }
 }
 
 @Composable

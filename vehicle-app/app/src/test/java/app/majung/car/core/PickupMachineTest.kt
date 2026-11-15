@@ -37,6 +37,12 @@ class PickupMachineTest {
         assertEquals(listOf<Effect>(Effect.PostStatus(PickupStatus.EN_ROUTE)), fx2)
     }
 
+    @Test fun `픽업 도중 앱이 다시 시작돼도 기어가 풀리면 출발을 알린다`() {
+        val (s1, fx1) = run(MachineState(), Event.ParkBrake(true), Event.Snapshot(pickup(5, PickupStatus.SPOT_CONFIRMED, a)))
+        assertTrue(fx1.isEmpty())
+        assertEquals(listOf<Effect>(Effect.PostStatus(PickupStatus.EN_ROUTE)), run(s1, Event.ParkBrake(false)).second)
+    }
+
     @Test fun `변경 요청 - 질문, 듣기, 동의, 경로 성공 순서로만 확정된다`() {
         val prop = Proposal(2, b, "정문 앞이 혼잡해요", true)
         val (s1, fx1) = run(enRoute(), Event.Snapshot(pickup(4, PickupStatus.EN_ROUTE, a, prop)))

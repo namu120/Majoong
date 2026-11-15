@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f8fa">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>마중</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{--bg:#f7f8fa;--surface:#fff;--high:#edeef2;--text:#131417;--text2:#131417d6;--text3:#131417a3;--line:#1314171a;
+--blue:#0064ff;--green:#08824a;--red:#fe3d16;--filled:#44464e}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;-webkit-text-size-adjust:100%}
+#app{display:flex;flex-direction:column;height:100dvh}
+header{padding:14px 16px 10px;display:flex;align-items:baseline;gap:8px}
+header h1{margin:0;font-size:20px;font-weight:800}
+header span{font-size:14px;color:var(--text3)}
+#map{flex:1;min-height:200px;background:var(--high)}
+.sheet{background:var(--surface);border-radius:24px 24px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -6px 24px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:12px;max-height:62dvh;overflow:auto}
+.card{background:var(--surface);border-radius:24px;padding:20px;margin:0 16px 16px;box-shadow:0 6px 24px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:12px}
+.banner{border-radius:16px;padding:14px 16px;background:var(--high)}
+.banner.pending{background:var(--blue);color:#fff}
+.banner.ok{background:var(--green);color:#fff}
+.banner.warn{background:#fff1ed;color:#a32307}
+.banner b{display:block;font-size:20px;line-height:26px}
+.banner small{font-size:14px;opacity:.9}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;min-height:48px;padding:0 16px;border-radius:14px;border:0;background:#1314170d;color:var(--text);font-weight:700;font-size:16px;flex:1 1 0;white-space:nowrap}
+button.on,button.primary{background:var(--filled);color:#fff}
+button.text{background:none;color:var(--text3);font-weight:400;flex:none;min-height:44px}
+button:disabled{opacity:.4}
+input[type=text],select{font:inherit;font-size:16px;min-height:48px;border-radius:14px;border:1px solid var(--line);padding:0 14px;width:100%;background:#fff;color:var(--text)}
+label{font-size:14px;color:var(--text3);display:flex;flex-direction:column;gap:6px}
+label.check{flex-direction:row;align-items:flex-start;gap:10px;font-size:15px;color:var(--text2)}
+label.check input{width:22px;height:22px;flex:none;margin-top:1px}
+p{margin:0;font-size:15px;line-height:22px;color:var(--text2)}
+h2{margin:0;font-size:18px}
+.meta{font-size:13px;color:var(--text3)}
+.meta.stale{color:var(--red);font-weight:700}
+.car-icon{width:44px;height:44px;border-radius:50%;background:var(--blue);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center}
+.car-icon.hazard{animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{background:#ff9d00}}
+.spot-pin{width:20px;height:20px;border-radius:50%;background:#fff;border:6px solid var(--text)}
+.spot-pin.proposed{border-color:var(--blue)}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// 마중 탑승자 웹 (참조 구현). 앱 설치 없이 초대 링크로 연다.
+// 최근 이동 모습(trail)은 메모리에만 두고, 화면을 닫으면 사라진다.
+const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const app = document.getElementById('app');
+const store = { get token() { return localStorage.getItem('majung.token'); }, set token(v) { v ? localStorage.setItem('majung.token', v) : localStorage.removeItem('majung.token'); } };
+const api = async (method, path, body, signal) => {
+  const res = await fetch(path, { method, signal, headers: { 'content-type': 'application/json', ...(store.token ? { authorization: 'Bearer ' + store.token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || res.status), { status: res.status });
+  return json;
+};
+const STALE_MS = 15000;
+const REASONS = ['정문 앞이 혼잡해요', '차를 세울 수 없어요', '비가 와요'];
+const ro = (w) => { const c = w.charCodeAt(w.length - 1); if (c < 0xac00 || c > 0xd7a3) return w + '(으)로'; const j = (c - 0xac00) % 28; return w + (j === 0 || j === 8 ? '로' : '으로'); };   // 한국어 조사 (으)로
+const RESULT_TEXT = { confirmed: (n) => `${ro(n)} 확정됐어요`, declined: () => '운전자가 기존 장소를 유지했어요', no_answer: () => '응답이 없어 기존 장소를 유지해요', route_failed: () => '내비 반영에 실패해 기존 장소를 유지해요' };
+
+let me = null, pickup = null, pollAbort = null, clockSkew = 0, lastOkAt = 0;
+let map, carMarker, spotMarker, proposedMarker, trail, trailPts = [], pickMode = null, picked = null;
+
+init();
+async function init() {
+  const invite = new URLSearchParams(location.search).get('invite');
+  if (invite && !store.token) return renderInvite(invite);
+  if (!store.token) return renderEmpty();
+  try { me = await api('GET', '/api/members/me'); } catch (e) { if (e.status === 401) { store.token = null; return renderEmpty(); } return renderOffline(); }
+  history.replaceState(null, '', '/');
+  me.activePickupId ? startPickup(me.activePickupId) : renderHome();
+}
+
+function renderEmpty() {
+  app.replaceChildren($(`<div><header><h1>마중</h1></header><div class="card"><h2>초대 링크가 필요해요</h2><p>운전자 차량 화면의 QR 코드를 찍거나, 받은 초대 링크를 열어 주세요.</p></div></div>`));
+}
+function renderOffline() {
+  app.replaceChildren($(`<div><header><h1>마중</h1></header><div class="card"><h2>연결할 수 없어요</h2><p>네트워크를 확인한 뒤 다시 시도해 주세요.</p><button class="primary" onclick="location.reload()">다시 시도</button></div></div>`));
+}
+function renderInvite(invite) {
+  const el = $(`<div><header><h1>마중</h1><span>초대</span></header><div class="card">
+    <h2>차량과 연결할까요?</h2>
+    <label>차량 화면에 표시될 이름<input type="text" id="name" maxlength="12" placeholder="예: 첫째" autocomplete="off"></label>
+    <div class="banner"><p><b style="font-size:16px">위치 공유 안내</b>픽업이 진행되는 동안에만 <u>차량의 위치</u>가 이 화면에 표시됩니다. 내 위치는 계속 추적하지 않고, <u>내가 고른 만남 지점</u>과 준비 상태만 운전자에게 전달됩니다. 픽업이 종료·취소되면 공유가 끝나며, 이동 이력은 저장하지 않습니다.</p></div>
+    <label class="check"><input type="checkbox" id="consent">위 내용을 확인했고 동의합니다.</label>
+    <button class="primary" id="go" disabled>연결하기</button><p class="meta" id="err"></p></div></div>`);
+  const name = el.querySelector('#name'), consent = el.querySelector('#consent'), go = el.querySelector('#go');
+  const sync = () => { go.disabled = !(consent.checked && name.value.trim()); };
+  name.oninput = consent.onchange = sync;
+  go.onclick = async () => {
+    go.disabled = true;
+    try { const r = await api('POST', `/api/invites/${encodeURIComponent(invite)}/accept`, { name: name.value.trim(), consent: true }); store.token = r.memberToken; init(); }
+    catch (e) { el.querySelector('#err').textContent = e.status === 410 ? '만료된 초대예요. 차량에서 QR을 다시 받아 주세요.' : '연결하지 못했어요. 다시 시도해 주세요.'; go.disabled = false; }
+  };
+  app.replaceChildren(el);
+}
+
+function renderHome() {
+  const el = $(`<div><header><h1>마중</h1><span>${esc(me.carAlias)} · ${esc(me.name)}</span></header>
+    <div class="card"><h2>대기 중</h2><p>운전자가 차량에서 나를 선택하면 이 화면이 자동으로 바뀝니다.</p></div>
+    <div class="card"><h2>저장한 만남 지점</h2><div id="spots"></div><p class="meta">픽업 중 지도에서 고른 장소를 저장할 수 있어요.</p></div>
+    <div class="card"><button class="text" id="leave">연결 해제</button></div></div>`);
+  const list = el.querySelector('#spots');
+  list.innerHTML = me.spots.length ? me.spots.map((s) => `<p>${s.isDefault ? '★ ' : ''}${esc(s.name)}${s.memo ? ' · ' + esc(s.memo) : ''}</p>`).join('') : '<p>아직 없어요.</p>';
+  el.querySelector('#leave').onclick = async () => { if (confirm('차량과의 연결을 해제할까요? 저장한 지점도 함께 삭제됩니다.')) { await api('DELETE', '/api/members/me'); store.token = null; renderEmpty(); } };
+  app.replaceChildren(el);
+  const t = setInterval(async () => { try { me = await api('GET', '/api/members/me'); if (me.activePickupId) { clearInterval(t); startPickup(me.activePickupId); } } catch {} }, 4000);
+}
+
+// ── 픽업 화면 ──────────────────────────────────────────
+function startPickup(pickupId) {
+  app.replaceChildren($(`<header><h1>마중</h1><span>${esc(me.carAlias)}</span></header>`), $(`<div id="map"></div>`), $(`<div class="sheet" id="sheet"></div>`));
+  map = L.map('map', { zoomControl: false, attributionControl: true }).setView([37.4979, 127.0276], 16);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  trail = L.polyline([], { color: '#0064ff', weight: 5, opacity: .35 }).addTo(map); trailPts = [];
+  carMarker = spotMarker = proposedMarker = null;
+  map.on('click', (e) => { if (pickMode) { picked = { ...picked, lat: e.latlng.lat, lng: e.latlng.lng }; drawPicked(); renderSheet(true); } });
+  pickup = null; poll(pickupId, -1);
+  setInterval(() => pickup && renderMeta(), 1000);
+}
+async function poll(pickupId, since) {
+  pollAbort = new AbortController();
+  try {
+    const p = await api('GET', `/api/pickups/${pickupId}?since=${since}`, null, pollAbort.signal);
+    clockSkew = p.serverTime - Date.now(); lastOkAt = Date.now();
+    onPickup(p);
+    if (['ENDED', 'CANCELLED', 'EXPIRED'].includes(p.status)) return;
+    poll(pickupId, p.rev);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (e.status === 401 || e.status === 403 || e.status === 404) return init();
+    renderMeta(); setTimeout(() => poll(pickupId, since), 2000);   // 끊기면 표시만 지연으로 바꾸고 재시도
+  }
+}
+function onPickup(p) {
+  const first = !pickup; if (first) sheetSig = ''; pickup = p;
+  if (['ENDED', 'CANCELLED', 'EXPIRED'].includes(p.status)) return renderDone();
+  const spot = p.confirmedSpot;
+  if (spot) { spotMarker ??= L.marker([spot.lat, spot.lng], { icon: L.divIcon({ className: '', html: '<div class="spot-pin"></div>', iconSize: [20, 20] }) }).addTo(map); spotMarker.setLatLng([spot.lat, spot.lng]); }
+  if (p.proposal) { proposedMarker ??= L.marker([0, 0], { icon: L.divIcon({ className: '', html: '<div class="spot-pin proposed"></div>', iconSize: [20, 20] }) }).addTo(map); proposedMarker.setLatLng([p.proposal.spot.lat, p.proposal.spot.lng]); }
+  else if (proposedMarker && !pickMode) { proposedMarker.remove(); proposedMarker = null; }
+  if (p.car) {
+    const ll = [p.car.lat, p.car.lng];
+    const html = `<div class="car-icon ${p.car.hazard ? 'hazard' : ''}" style="transform:rotate(${p.car.heading ?? 0}deg)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.5V5"/><path d="M6 11l6-6 6 6"/></svg></div>`;
+    carMarker ??= L.marker(ll, { zIndexOffset: 1000 }).addTo(map);
+    carMarker.setLatLng(ll).setIcon(L.divIcon({ className: '', html, iconSize: [44, 44], iconAnchor: [22, 22] }));
+    trailPts.push(ll); if (trailPts.length > 40) trailPts.shift(); trail.setLatLngs(trailPts);
+  }
+  const spotKey = spot && spot.lat + ',' + spot.lng;
+  if (first || spotKey !== lastSpotKey) { lastSpotKey = spotKey; fit(); }
+  renderSheet();
+}
+function fit() {
+  const pts = [pickup.car && [pickup.car.lat, pickup.car.lng], pickup.confirmedSpot && [pickup.confirmedSpot.lat, pickup.confirmedSpot.lng]].filter(Boolean);
+  if (pts.length === 2) map.fitBounds(pts, { padding: [60, 60], maxZoom: 17 }); else if (pts.length) map.setView(pts[0], 17);
+}
+function drawPicked() {
+  if (picked?.lat == null) return;
+  proposedMarker ??= L.marker([0, 0], { icon: L.divIcon({ className: '', html: '<div class="spot-pin proposed"></div>', iconSize: [20, 20] }) }).addTo(map);
+  proposedMarker.setLatLng([picked.lat, picked.lng]);
+}
+function renderMeta() {
+  const el = document.getElementById('meta'); if (!el) return;
+  const offline = Date.now() - lastOkAt > 30000;
+  if (!pickup.car) { el.textContent = offline ? '연결이 끊겼어요. 다시 연결하는 중…' : '차량 위치를 기다리는 중'; el.className = 'meta' + (offline ? ' stale' : ''); return; }
+  const age = Math.max(0, Date.now() + clockSkew - pickup.car.receivedAt);
+  const stale = offline || age > STALE_MS;
+  el.className = 'meta' + (stale ? ' stale' : '');
+  el.textContent = (stale ? '위치 표시가 지연되고 있어요 · ' : '') + `마지막 갱신 ${age < 5000 ? '방금' : Math.round(age / 1000) + '초 전'}` + (pickup.car.mock ? ' · 모의 위치' : '');
+}
+// 차량 좌표는 1초마다 오지만, 시트는 내용이 바뀔 때만 다시 그린다(입력 중 포커스 유지).
+let sheetSig = '', lastSpotKey = null;
+function renderSheet(force) {
+  const p = pickup, sheet = document.getElementById('sheet'); if (!sheet) return;
+  const needsSpot = !p.confirmedSpot && !p.proposal;
+  const picking = pickMode || (needsSpot && !p.accepted);
+  const r0 = p.lastResult;
+  const sig = picking ? 'pick' : JSON.stringify([p.status, p.accepted, p.confirmedSpot, p.proposal, p.member, r0 && [r0.seq, Date.now() + clockSkew - r0.at < 20000]]);
+  if (!force && sig === sheetSig) return renderCues();
+  sheetSig = sig;
+  if (picking) return renderPicker(sheet, needsSpot || pickMode === 'accept' ? 'accept' : 'change');
+  const title = { REQUESTED: '픽업 요청이 왔어요', SPOT_CONFIRMED: '곧 출발해요', EN_ROUTE: '마중 가는 중', NEAR: '거의 다 왔어요' }[p.status];
+  let banner;
+  if (p.proposal?.by === 'member') banner = `<div class="banner pending"><b>${esc(p.proposal.spot.name)}</b><small>운전자 확인 대기 중 · 확정 전까지 기존 장소가 유지돼요</small></div>`;
+  else if (p.confirmedSpot) banner = `<div class="banner ${p.status === 'NEAR' ? 'ok' : ''}"><b>${esc(p.confirmedSpot.name)}</b><small>${title}<span id="cues"></span></small></div>`;
+  else banner = `<div class="banner"><b>${title}</b><small>만남 지점을 정하는 중</small></div>`;
+  const r = p.lastResult, recent = r && Date.now() + clockSkew - r.at < 20000 && r.seq > 1;
+  const result = recent ? `<div class="banner ${r.result === 'confirmed' ? 'ok' : 'warn'}"><small>${esc(RESULT_TEXT[r.result](r.spotName))}</small></div>` : '';
+  const st = p.member.state;
+  sheet.innerHTML = `${banner}${result}
+    <p class="meta">${esc(p.carAlias)}${p.status === 'NEAR' ? ' · 지도에서 차가 오는 방향을 확인하세요' : ''}</p><p class="meta" id="meta"></p>
+    ${p.accepted ? '' : '<button class="primary" id="accept">픽업 수락</button>'}
+    <div class="row"><button data-s="PREPARING" class="${st === 'PREPARING' ? 'on' : ''}">준비 중</button><button data-s="OUTSIDE" class="${st === 'OUTSIDE' ? 'on' : ''}">나와 있어요</button><button data-s="LATE" class="${st === 'LATE' ? 'on' : ''}">늦어요</button></div>
+    <div id="late" class="row ${st === 'LATE' ? '' : 'hidden'}"><select id="mins">${[5, 10, 15, 20, 30].map((m) => `<option ${p.member.lateMinutes === m ? 'selected' : ''} value="${m}">${m}분</option>`).join('')}</select><input type="text" id="why" maxlength="20" placeholder="사유 (선택)" value="${esc(p.member.reason)}"><button id="sendLate">전달</button></div>
+    <div class="row"><button id="change" ${p.confirmedSpot ? '' : 'disabled'}>만남 장소 변경</button><button class="text" id="cancel">공유 끝내기</button></div>`;
+  renderMeta(); renderCues();
+  sheet.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => b.dataset.s === 'LATE' ? sheet.querySelector('#late').classList.remove('hidden') : setState({ state: b.dataset.s }));
+  sheet.querySelector('#sendLate').onclick = () => setState({ state: 'LATE', lateMinutes: Number(sheet.querySelector('#mins').value), reason: sheet.querySelector('#why').value.trim() });
+  sheet.querySelector('#change').onclick = () => { pickMode = 'change'; picked = null; renderSheet(true); };
+  sheet.querySelector('#cancel').onclick = async () => { if (confirm('픽업을 취소하고 위치 공유를 끝낼까요?')) await api('POST', `/api/pickups/${p.pickupId}/cancel`); };
+  const acc = sheet.querySelector('#accept'); if (acc) acc.onclick = () => api('POST', `/api/pickups/${p.pickupId}/accept`, {}).then(onPickup);
+}
+const setState = (body) => api('PUT', `/api/pickups/${pickup.pickupId}/member`, body).then(onPickup).catch(() => alert('전달하지 못했어요. 다시 시도해 주세요.'));
+
+// 거리·도착 예정·차 찾기 단서는 시트를 다시 그리지 않고 글자만 바꾼다.
+function renderCues() {
+  const el = document.getElementById('cues'), c = pickup.car; if (!el) return;
+  const cues = [];
+  if (c?.remainingM != null) cues.push(c.remainingM >= 1000 ? (c.remainingM / 1000).toFixed(1) + ' km' : Math.round(c.remainingM / 10) * 10 + ' m');
+  if (c?.etaSec != null) cues.push(Math.max(1, Math.round(c.etaSec / 60)) + '분 뒤 도착');
+  if (c?.hazard) cues.push('비상등 켜짐');
+  if (c?.turnSignal && c.turnSignal !== 'OFF') cues.push((c.turnSignal === 'LEFT' ? '왼쪽' : '오른쪽') + ' 깜빡이');
+  if (c?.nextTurn) cues.push(c.nextTurn);
+  el.textContent = cues.length ? ' · ' + cues.join(' · ') : '';
+}
+function renderPicker(sheet, mode) {
+  pickMode = mode;
+  const saved = me.spots.filter((s) => s.name !== pickup.confirmedSpot?.name);
+  sheet.innerHTML = `<h2>${mode === 'accept' ? '어디서 만날까요?' : '어디로 바꿀까요?'}</h2><p>저장한 장소를 고르거나 지도를 눌러 핀을 놓으세요.</p>
+    <div class="row">${saved.map((s, i) => `<button data-i="${i}">${esc(s.name)}</button>`).join('')}</div>
+    <label>장소 이름<input type="text" id="pname" maxlength="40" placeholder="예: 3번 출구 앞" value="${esc(picked?.name)}"></label>
+    <label>메모 (운전자에게 음성으로 안내돼요)<input type="text" id="pmemo" maxlength="60" placeholder="예: 회색 코트" value="${esc(picked?.memo)}"></label>
+    ${mode === 'change' ? `<label>사유<select id="preason">${REASONS.map((r) => `<option>${r}</option>`).join('')}<option value="">선택 안 함</option></select></label>` : ''}
+    <label class="check"><input type="checkbox" id="psave">다음에도 쓰도록 저장</label>
+    <div class="row">${mode === 'change' ? '<button id="pback">취소</button>' : ''}<button class="primary" id="psend" ${picked?.lat != null ? '' : 'disabled'}>${mode === 'accept' ? '이 장소로 수락' : '변경 요청'}</button></div>`;
+  const keep = () => { picked = { ...picked, name: sheet.querySelector('#pname').value, memo: sheet.querySelector('#pmemo').value }; };
+  sheet.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => { picked = { ...saved[b.dataset.i] }; drawPicked(); map.setView([picked.lat, picked.lng], 17); renderPicker(sheet, mode); });
+  sheet.querySelector('#pname').oninput = sheet.querySelector('#pmemo').oninput = keep;
+  const back = sheet.querySelector('#pback'); if (back) back.onclick = () => { pickMode = null; picked = null; if (proposedMarker && !pickup.proposal) { proposedMarker.remove(); proposedMarker = null; } renderSheet(true); };
+  sheet.querySelector('#psend').onclick = async () => {
+    keep();
+    const spot = { name: picked.name?.trim() || '지도에서 고른 곳', lat: picked.lat, lng: picked.lng, memo: picked.memo?.trim() || '' };
+    const path = `/api/pickups/${pickup.pickupId}/` + (mode === 'accept' ? 'accept' : 'proposals');
+    try {
+      const p = await api('POST', path, { spot, reason: sheet.querySelector('#preason')?.value ?? '' });
+      if (sheet.querySelector('#psave').checked) { me.spots = (await api('PUT', '/api/members/me/spots', { spots: [...me.spots, spot] })).spots; }
+      pickMode = null; picked = null; sheetSig = ''; onPickup(p);
+    } catch { alert('요청하지 못했어요. 다시 시도해 주세요.'); }
+  };
+}
+function renderDone() {
+  const text = { ENDED: '픽업이 끝났어요', CANCELLED: '픽업이 취소됐어요', EXPIRED: '픽업이 만료됐어요' }[pickup.status];
+  trailPts = []; pickMode = null; picked = null;
+  app.replaceChildren($(`<div><header><h1>마중</h1></header><div class="card"><h2>${text}</h2><p>차량 위치 공유가 종료됐습니다.</p><button class="primary" onclick="location.reload()">확인</button></div></div>`));
+}
+</script>
+</body>
+</html>

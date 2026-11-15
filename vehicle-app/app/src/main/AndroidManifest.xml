@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Pleos SDK 권한: 쓰는 것만 선언한다. 문자열은 각 SDK의 Declaring permissions 페이지 기준 -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />          <!-- get*Info() -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />   <!-- requestRoute() -->
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />          <!-- 비상등·방향지시등 -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />           <!-- 주차 브레이크 -->
+    <!-- 종료 제안(도어·좌석·안전벨트)을 넣을 때만 추가: pleos.car.permission.CAR_DOORS 외 — M1에서 문자열 확인 -->
+
+    <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
+
+    <!-- TODO: 앱 아이콘(시안 A 또는 B)을 mipmap 에 넣고 application 에 android:icon 을 지정 -->
+    <application
+        android:name=".MajungApp"
+        android:label="마중"
+        android:usesCleartextTraffic="true"
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <!-- usesCleartextTraffic 은 로컬 개발 서버용. 배포 서버는 HTTPS 로 두고 false 로 바꾼다. -->
+
+        <!-- screenOrientation 을 지정하지 않는다 → 세로 한 창(split view)에서 동작. -->
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
+            <!-- 주행 중 사용 선언(AAOS 표준). Pleos 심사에서 요구하는 추가 선언이 있는지 M1에서 확인 -->
+            <meta-data android:name="distractionOptimized" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 픽업이 진행 중일 때만 떠 있는 포그라운드 서비스. 종료·취소·만료 즉시 내린다(BG→CCH 가이드). -->
+        <service android:name=".PickupService" android:exported="false" android:foregroundServiceType="location" />
+    </application>
+</manifest>

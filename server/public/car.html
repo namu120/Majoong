@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마중 · 차량 화면 프로토타입</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Asta+Sans:wght@300..800&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+/* 차량 화면 프로토타입(웹). 디자인 시안의 2560×1440 예시 폼팩터를 그대로 그리고 창 크기에 맞춰 축소한다.
+   왼쪽 내비게이션·차량 위치·기어·비상등은 전부 모의이며, 오른쪽 마중 화면은 실제 서버 상태로 동작한다. */
+:root{--active:#02c265;--ring:#13141733;--bg:#f7f8fa;--surface:#fff;--high:#edeef2;--t1:#131417;--t2:#131417d6;--t3:#131417a3;--line:#1314171a;--blue:#0064ff;--green:#08824a;--filled:#44464e;--basic:#1314170d}
+[hidden]{display:none!important}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#1d1e21;overflow:hidden;font-family:"Asta Sans","42dot Sans","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;color:var(--t1)}
+#stage{width:2560px;height:1440px;transform-origin:0 0;background:#c7c9ce;padding:0 40px;display:flex;flex-direction:column;position:absolute;left:0;top:0}
+.bar{flex:none;display:flex;align-items:center;gap:24px;font-size:24px;color:var(--t2)}
+.row{display:flex;gap:40px;height:1240px;flex:none}
+#nav{width:1600px;height:1240px;border-radius:32px;overflow:hidden;position:relative;background:#e9ecf0}
+#navmap{position:absolute;inset:0}
+.chip{position:absolute;z-index:500;border-radius:32px;padding:28px 40px;background:#1d1e21;color:#fff;font-weight:800}
+#tbt{left:40px;top:40px;font-size:60px;line-height:80px}
+#tbt small{font-size:36px;font-weight:700}
+#tbt div{font-size:30px;line-height:38px;font-weight:400;opacity:.8}
+#mock{right:40px;top:40px;background:#fff;color:var(--t2);font-size:24px;font-weight:400;padding:12px 24px;border-radius:16px}
+#voice{left:40px;right:40px;bottom:40px;font-size:36px;line-height:48px;font-weight:700;display:flex;gap:24px;align-items:center}
+#voice span{font-size:24px;font-weight:400;opacity:.7;white-space:nowrap}
+#app{width:840px;height:1240px;border-radius:32px;overflow:hidden;background:var(--bg);display:flex;flex-direction:column;gap:32px;padding:32px 40px 40px}
+.head{display:flex;align-items:center;height:48px;flex:none;font-size:32px;font-weight:700;color:var(--t3)}
+.head.big{height:104px;font-size:40px;line-height:52px;font-weight:800;color:var(--t1);gap:24px}
+.head.big svg{border-radius:20px;flex:none}
+#app.parked{padding-top:24px}#app.depth{padding:24px 0 40px}#app.depth>.pad{padding:0 40px;display:flex;flex-direction:column;gap:32px;flex:1}
+.title{display:flex;align-items:center;gap:24px;min-height:80px;padding:0 24px 0 40px;font-size:40px;line-height:52px;font-weight:700;flex:none}
+.card.eta{flex-direction:row;align-items:center;gap:16px;padding:48px}.eta b{margin-left:auto;font-size:40px;line-height:52px;font-weight:800}
+.head i{margin-left:auto;font-style:normal;font-size:24px;font-weight:400;color:var(--t3)}
+.card{background:var(--surface);border-radius:48px;box-shadow:0 6px 24px rgba(0,0,0,.08);overflow:hidden;display:flex;flex-direction:column}
+.grow{flex:1 1 0}
+.band{height:400px;padding:0 48px 32px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;flex:none}
+.band p{margin:0;font-size:40px;line-height:52px;font-weight:700;color:var(--t2)}
+.band h2{margin:0;font-size:112px;line-height:134px;font-weight:700;letter-spacing:-.03em;white-space:nowrap}
+.band.blue{background:var(--blue)}.band.green{background:var(--green)}
+.band.blue *,.band.green *{color:#fff}.band.blue p,.band.green p{color:#ffffffd6}
+.rule{height:2px;margin:0 48px;background:var(--line);flex:none}
+.rows{padding:32px 48px 0;display:flex;flex-direction:column;gap:24px}
+.num{display:flex;align-items:center;gap:20px;font-size:60px;line-height:80px;font-weight:800}
+.num small{font-size:36px;font-weight:700}
+.arrow{width:72px;height:72px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;flex:none}
+.ln{margin:0;font-size:30px;line-height:38px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.il{display:flex;align-items:center;gap:16px;min-width:0}.il svg{flex:none}.ind{padding-left:80px}
+.mic svg,.arrow svg{display:block}
+.ask{display:flex;align-items:center;gap:20px;padding:24px 32px;margin-top:8px;border-radius:32px;background:var(--bg)}
+.ask b{display:block;font-size:32px;line-height:40px}.ask span{font-size:26px;color:var(--t3)}
+.mic{width:72px;height:72px;border-radius:50%;background:var(--blue);flex:none;display:flex;align-items:center;justify-content:center}.mic.on{animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.5}}
+button{font:inherit;border:0;cursor:pointer;border-radius:32px;height:100px;font-size:32px;line-height:40px;font-weight:700;background:var(--basic);color:var(--t1);flex:1 1 0;padding:16px 40px;white-space:nowrap}
+button:active{background:#1314171a}button.fill:active{background:#313236}
+button.fill{background:var(--filled);color:#fff}
+button.sm{height:80px;border-radius:24px;font-size:30px;line-height:38px;padding:16px 32px;flex:none}
+button.back{flex:none;background:none;padding:0;height:56px;width:56px;border-radius:16px;display:flex;align-items:center;justify-content:center}
+.btns{display:flex;gap:24px;flex:none}
+.person{display:flex;align-items:center;gap:24px;padding:32px 0}
+.person h3{margin:0;font-size:36px;line-height:44px}.person p{margin:4px 0 0;font-size:26px;color:var(--t3)}
+.person div{flex:1;min-width:0}
+.qr{align-items:center;justify-content:center;gap:32px;text-align:center;padding:48px}
+#qrbox{width:280px;height:280px;border-radius:32px;background:var(--high);display:flex;align-items:center;justify-content:center;padding:24px}
+#qrbox img,#qrbox canvas{width:232px!important;height:232px!important}
+.radio{display:flex;align-items:center;gap:8px;min-height:96px;font-size:30px;line-height:38px;cursor:pointer}
+.radio u{width:64px;height:64px;flex:none;display:flex;align-items:center;justify-content:center}
+.radio u::after{content:"";width:48px;height:48px;border-radius:50%;box-shadow:inset 0 0 0 4px var(--ring)}
+.radio.on u::after{background:#fff;box-shadow:inset 0 0 0 12px var(--active)}
+.console{margin-left:auto;display:flex;gap:16px;align-items:center}
+.console button{min-height:72px;border-radius:20px;font-size:26px;flex:none;background:#fff;padding:0 28px}
+.console button.on{background:var(--filled);color:#fff}
+.car{width:92px;height:92px;border-radius:50%;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center}
+.dest{width:60px;height:60px;border-radius:50%;background:#fff;border:14px solid var(--blue)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="bar" style="height:80px">Pleos Connect 화면 구성 예시 (웹 프로토타입)</div>
+  <div class="row">
+    <section id="nav">
+      <div id="navmap"></div>
+      <div class="chip" id="tbt" hidden></div>
+      <div class="chip" id="mock">모의 내비게이션 · 모의 위치</div>
+      <div class="chip" id="voice" hidden><span>음성 안내</span><b id="voicetext"></b></div>
+    </section>
+    <section id="app"></section>
+  </div>
+  <div class="bar" style="height:120px">
+    <div class="console"><span>버추얼 콘솔(모의)</span>
+      <button id="gearP" class="on">P</button><button id="gearD">D</button><button id="hz">비상등</button>
+    </div>
+  </div>
+</div>
+<script>
+// 차량 앱(Kotlin, vehicle-app/)의 PickupMachine 과 같은 규칙을 웹으로 옮긴 프로토타입.
+// 서버와의 통신·변경 요청 처리 규칙은 실제이고, 내비게이션·위치·기어·비상등은 모의다.
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ro = (w) => { const c = w.charCodeAt(w.length - 1); if (c < 0xac00 || c > 0xd7a3) return w + '(으)로'; const j = (c - 0xac00) % 28; return w + (j === 0 || j === 8 ? '로' : '으로'); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const rad = Math.PI / 180;
+const dist = (a, b) => { const h = Math.sin((b.lat - a.lat) * rad / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin((b.lng - a.lng) * rad / 2) ** 2; return 2 * 6371000 * Math.asin(Math.sqrt(h)); };
+const bearing = (a, b) => { const y = Math.sin((b.lng - a.lng) * rad) * Math.cos(b.lat * rad), x = Math.cos(a.lat * rad) * Math.sin(b.lat * rad) - Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lng - a.lng) * rad); return (Math.atan2(y, x) / rad + 360) % 360; };
+const fmt = (m) => m >= 1000 ? [(m / 1000).toFixed(1), 'km'] : [String(Math.round(m / 10) * 10), 'm'];
+const TERMINAL = ['ENDED', 'CANCELLED', 'EXPIRED'];
+const ic = (d, size = 44, stroke = '#131417') => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const PIN = '<path d="M12 21c4-4.2 6-7.4 6-10a6 6 0 1 0-12 0c0 2.6 2 5.8 6 10z"/><circle cx="12" cy="11" r="2.2"/>', CLOCK = '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  HAZ = '<path d="M12 4.5 20.5 19h-17z"/><path d="M12 10.2 15.3 16H8.7z"/>', MIC = '<rect x="9" y="3.5" width="6" height="10.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>', BACK = '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>';
+const line = (icon, text) => `<div class="il">${ic(icon)}<p class="ln">${esc(text)}</p></div>`;
+const APPICON = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" aria-hidden="true" viewBox="0 0 432 432" fill="none"><rect width="432" height="432" fill="#0064ff"/><path d="M -20 236 C 70 120 250 44 452 40 L 452 452 L -20 452 Z" fill="#3d8bff"/><path d="M 96 176 C 180 108 310 76 452 74 L 452 150 C 310 150 190 160 96 176 Z" fill="#0050d6"/><rect x="262" y="213" width="92" height="26" rx="13" fill="#fff"/><g transform="translate(134 344) rotate(-36)" fill="#fff"><rect x="-200" y="-30" width="230" height="60" rx="28"/><rect x="-6" y="-46" width="96" height="92" rx="30"/><rect x="58" y="-45" width="82" height="21" rx="10.5"/><rect x="58" y="-22" width="94" height="21" rx="10.5"/><rect x="58" y="1" width="86" height="21" rx="10.5"/><rect x="58" y="24" width="66" height="21" rx="10.5"/><rect x="14" y="-38" width="74" height="24" rx="12" transform="rotate(-34 14 -26)"/></g></svg>';
+const UP = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.5V5"/><path d="M6 11l6-6 6 6"/></svg>';
+
+let token = localStorage.getItem('majung.car');
+const api = async (method, path, body) => {
+  const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error), { status: res.status });
+  return json;
+};
+
+const S = { me: null, invite: null, confirming: null, selected: null, p: null, phase: 'idle', phaseSeq: 0, handled: 0, announced: 0, acked: 0, memoFor: null,
+  gear: 'P', hazard: false, pos: { lat: 37.4925, lng: 127.0205 }, heading: 30, navDest: null, d: null, offline: false };
+
+// ── 모의 내비게이션 ──
+const map = L.map('navmap', { zoomControl: false, attributionControl: true, zoomSnap: 0.25 }).setView([S.pos.lat, S.pos.lng], 16.5);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+const routeLine = L.polyline([], { color: '#0064ff', weight: 14, opacity: .9 }).addTo(map);
+const carMk = L.marker([S.pos.lat, S.pos.lng], { zIndexOffset: 1000 }).addTo(map);
+let destMk = null;
+function drawNav() {
+  carMk.setLatLng([S.pos.lat, S.pos.lng]).setIcon(L.divIcon({ className: '', iconSize: [92, 92], iconAnchor: [46, 46],
+    html: `<div class="car" style="transform:rotate(${S.heading}deg)"><svg width="52" height="52" viewBox="-26 -30 52 56"><path d="M0 -26 22 20 0 9 -22 20Z" fill="#131417"/></svg></div>` }));
+  if (S.navDest) {
+    destMk ??= L.marker([0, 0], { icon: L.divIcon({ className: '', html: '<div class="dest"></div>', iconSize: [60, 60], iconAnchor: [30, 30] }) }).addTo(map);
+    destMk.setLatLng([S.navDest.lat, S.navDest.lng]);
+    routeLine.setLatLngs([[S.pos.lat, S.pos.lng], [S.navDest.lat, S.navDest.lng]]);
+    const [n, u] = fmt(S.d ?? dist(S.pos, S.navDest));
+    $('tbt').hidden = false; $('tbt').innerHTML = `${n}<small> ${u}</small><div>${esc(S.navDest.name)}</div>`;
+  } else { destMk?.remove(); destMk = null; routeLine.setLatLngs([]); $('tbt').hidden = true; }
+}
+const fitNav = () => S.navDest ? map.fitBounds([[S.pos.lat, S.pos.lng], [S.navDest.lat, S.navDest.lng]], { padding: [260, 260], maxZoom: 17.5 }) : map.setView([S.pos.lat, S.pos.lng], 16.5);
+/** 모의 requestRoute: 0.9초 뒤 성공. 실제 앱에서는 NaviHelper 성공 콜백을 기다린다. */
+async function requestRoute(spot) { await sleep(900); S.navDest = spot; S.d = dist(S.pos, spot); drawNav(); fitNav(); return true; }
+
+// ── 음성 ──
+// 소리는 내지 않는다. 차량이 음성으로 안내할 문장을 자막으로 보여 준다(시연 페이지에서는 화면 맨 아래에 표시).
+const embedded = parent !== window;
+let speakChain = Promise.resolve();
+function speak(text) {
+  speakChain = speakChain.then(() => new Promise((done) => {
+    if (embedded) parent.postMessage({ majungCaption: text }, location.origin);
+    else { $('voice').hidden = false; $('voicetext').textContent = text; }
+    setTimeout(() => { if (embedded) parent.postMessage({ majungCaption: null }, location.origin); else $('voice').hidden = true; done(); }, 1400 + text.length * 120);
+  }));
+  return speakChain;
+}
+
+// ── 픽업 로직 (PickupMachine 과 같은 규칙) ──
+async function resolve(seq, result) {
+  S.handled = Math.max(S.handled, seq); S.phase = 'idle';
+  try { onSnap(await api('POST', `/api/pickups/${S.p.pickupId}/proposals/${seq}/resolve`, { result })); } catch (e) { if (e.status !== 409) console.warn(e); }
+}
+async function route(seq, spot, first) {
+  S.phase = 'routing'; S.phaseSeq = seq; render();
+  const ok = await requestRoute(spot);
+  if (S.phase !== 'routing' || S.phaseSeq !== seq) return;            // 그 사이 새 요청이 왔다 → 버린다
+  if (!ok) { await resolve(seq, 'route_failed'); speak(first ? '목적지를 설정하지 못했습니다.' : '목적지를 바꾸지 못했습니다. 기존 장소로 계속 안내합니다.'); return; }
+  S.memoFor = null;
+  await resolve(seq, 'confirmed');                                     // 내비 반영 성공 뒤에만 확정을 보고
+  speak(`${ro(spot.name)} 안내를 시작합니다.`);
+  depart();
+}
+let listenTimer = null;
+async function ask(prop) {
+  S.phase = 'asking'; S.phaseSeq = prop.seq; render();
+  const why = prop.reason.endsWith('요') ? prop.reason.slice(0, -1) + '서 ' : '';
+  await speak(`${why}${ro(prop.spot.name)} 변경 요청이 왔습니다. 안내할까요?`);
+  if (S.phase !== 'asking' || S.phaseSeq !== prop.seq) return;
+  S.phase = 'listening'; render();
+  listenTimer = setTimeout(() => answer(null), 8000);                  // 무응답 → 기존 지점 유지
+}
+function answer(yes) {
+  if (!['asking', 'listening'].includes(S.phase)) return;
+  clearTimeout(listenTimer);
+  const seq = S.phaseSeq, prop = S.p?.proposal;
+  if (yes && prop?.seq === seq) return route(seq, prop.spot, false);
+  resolve(seq, yes === false ? 'declined' : 'no_answer'); speak('기존 장소로 계속 안내합니다.');
+}
+function depart() {
+  if (S.p && S.navDest && S.gear === 'D' && ['REQUESTED', 'SPOT_CONFIRMED'].includes(S.p.status))
+    api('POST', `/api/pickups/${S.p.pickupId}/status`, { status: 'EN_ROUTE' }).then(onSnap).catch(() => {});
+}
+function onSnap(p) {
+  if (S.p && p.pickupId === S.p.pickupId && p.rev <= S.p.rev) return;
+  if (TERMINAL.includes(p.status)) {
+    clearTimeout(listenTimer);
+    Object.assign(S, { p: null, phase: 'idle', handled: 0, announced: 0, acked: 0, memoFor: null, navDest: null, d: null, confirming: null });
+    drawNav(); fitNav(); refreshMe(); return render();
+  }
+  if (!S.p && p.confirmedSpot) {                                        // 새로고침 뒤 진행 중 픽업 복구
+    S.navDest = p.confirmedSpot; S.announced = p.member.seq;
+    if (p.car) { S.pos = { lat: p.car.lat, lng: p.car.lng }; S.heading = p.car.heading ?? S.heading; if (p.car.parked === false) setGear('D'); S.hazard = !!p.car.hazard; $('hz').classList.toggle('on', S.hazard); }
+    S.d = dist(S.pos, S.navDest); drawNav(); fitNav();
+  }
+  S.p = p;
+  if (p.member.seq > S.announced) {
+    S.announced = p.member.seq; const m = p.member, n = p.memberName;
+    speak({ PREPARING: `${n}, 준비 중입니다.`, OUTSIDE: `${n}, 나와 있어요.`, LATE: `${n}, ${m.lateMinutes}분 늦어요.${m.reason ? ' 사유, ' + m.reason + '.' : ''}` }[m.state]);
+  }
+  const prop = p.proposal && p.proposal.seq > S.handled ? p.proposal : null;
+  if (!prop) { if (S.phase !== 'idle' && S.phase !== 'routing') { clearTimeout(listenTimer); S.phase = 'idle'; } }
+  else if (S.phase === 'idle' || S.phaseSeq !== prop.seq) {
+    clearTimeout(listenTimer);
+    p.confirmedSpot ? ask(prop) : route(prop.seq, prop.spot, true);    // 첫 목적지는 묻지 않고 바로 반영
+  }
+  render();
+}
+async function poll(pickupId) {
+  let rev = -1;
+  while (S.p?.pickupId === pickupId || rev === -1) {
+    try { const p = await api('GET', `/api/pickups/${pickupId}?since=${rev}`); S.offline = false; rev = p.rev; onSnap(p); if (TERMINAL.includes(p.status)) return; }
+    catch (e) { if (e.status === 404 || e.status === 403) { S.p = null; return render(); } S.offline = true; render(); await sleep(2000); }
+  }
+}
+// 1초마다: 모의 주행 + 최신 차량 상태 덮어쓰기
+setInterval(() => {
+  const p = S.p; if (!p) return;
+  if (S.navDest && S.gear === 'D' && ['EN_ROUTE', 'NEAR'].includes(p.status)) {
+    const d = dist(S.pos, S.navDest);
+    if (d > 8) { S.heading = bearing(S.pos, S.navDest); const k = Math.min(12, d) / d; S.pos = { lat: S.pos.lat + (S.navDest.lat - S.pos.lat) * k, lng: S.pos.lng + (S.navDest.lng - S.pos.lng) * k }; }
+    S.d = dist(S.pos, S.navDest);
+    if (S.d <= 150) {
+      if (p.status === 'EN_ROUTE') api('POST', `/api/pickups/${p.pickupId}/status`, { status: 'NEAR' }).then(onSnap).catch(() => {});
+      const spot = p.confirmedSpot;
+      if (spot?.memo && S.memoFor !== spot.spotId && S.phase === 'idle') { S.memoFor = spot.spotId; speak(`${spot.name}, ${spot.memo}`); }
+    }
+    drawNav(); render();
+  }
+  api('PUT', `/api/pickups/${p.pickupId}/car`, { ...S.pos, heading: S.heading, hazard: S.hazard, parked: S.gear === 'P', remainingM: S.d == null ? null : Math.round(S.d), etaSec: S.d == null ? null : Math.round(S.d / 8), mock: true, ts: Date.now() }).catch(() => {});
+}, 1000);
+
+// ── 화면 (시안 ①, C, ②~⑤, D) ──
+function render() {
+  const el = $('app'), p = S.p;
+  if (!p) return S.confirming ? renderConfirm(el) : renderHome(el);
+  const spot = p.confirmedSpot, prop = p.proposal && p.proposal.seq > S.handled ? p.proposal : null, m = p.member;
+  const head = `<div class="head">마중${S.offline ? '<i>연결 지연 · 기존 장소로 안내 중</i>' : ''}</div>`;
+  const [n, u] = S.d == null ? ['', ''] : fmt(S.d);
+  const close = p.status === 'NEAR' || (S.d ?? 1e9) <= 500;
+  const arrow = close ? `<div class="arrow" style="transform:rotate(${Math.round(bearing(S.pos, spot ?? S.pos) - S.heading)}deg)">${UP}</div>` : '';
+  const distance = S.d == null ? '' : `<div class="num">${arrow}${n}<small> ${u}</small></div>`;
+  let band, rows, btns = '';
+  if (!spot) { band = ['', prop ? '목적지 설정 중' : '장소를 고르는 중']; rows = line(PIN, `${p.memberName}의 휴대폰에서 만남 장소를 확인하고 있어요`); if (S.gear === 'P') btns = '<button data-a="cancel">픽업 취소</button>'; }
+  else if (prop && S.phase !== 'idle') {
+    band = ['blue', '변경 요청'];
+    rows = `<div class="num">${ic(PIN, 60)}<span class="ln" style="font:inherit;color:inherit">${esc(prop.spot.name)}</span></div><div class="ind"><p class="ln">기존 : ${esc(spot.name)}</p></div>${prop.reason ? `<div class="ind"><p class="ln">사유 : ${esc(prop.reason)}</p></div>` : ''}
+      <div class="ask"><div class="mic ${S.phase === 'listening' ? 'on' : ''}">${ic(MIC, 48, '#fff')}</div><div><span>${{ asking: '안내 중', listening: '듣는 중', routing: '목적지 변경 중' }[S.phase]}</span><b>${esc(ro(prop.spot.name))} 안내할까요?</b></div></div>`;
+    if (S.phase !== 'routing') btns = '<button data-a="no">아니요</button><button class="fill" data-a="yes">네</button>';
+  } else if (m.state === 'LATE' && m.seq > S.acked) {
+    band = ['', `${m.lateMinutes}분 늦어요`]; rows = `${distance}${line(PIN, spot.name + ' · 그대로')}${m.reason ? line(CLOCK, '사유 · ' + m.reason) : ''}`; btns = '<button class="fill" data-a="ack">확인</button>';
+  } else {
+    band = m.state === 'OUTSIDE' ? ['green', '기다리는 중'] : ['', close ? '준비 중' : '마중 가는 중'];
+    rows = `${distance}${line(PIN, spot.name)}${S.hazard ? line(HAZ, `비상등 켜짐 · ${p.memberName} 화면에 표시 중`) : (S.d != null ? line(CLOCK, `${Math.max(1, Math.round(S.d / 8 / 60))}분 뒤 도착`) : '')}`;
+    if (p.status === 'NEAR') btns = '<button class="fill" data-a="end">탑승 종료</button>'; else if (S.gear === 'P') btns = '<button data-a="cancel">픽업 취소</button>';
+  }
+  el.className = '';
+  const html = `${head}<div class="card grow"><div class="band ${band[0]}"><p>${esc(p.memberName)}</p><h2>${esc(band[1])}</h2></div>${band[0] ? '' : '<div class="rule"></div>'}<div class="rows">${rows}</div></div>${btns ? `<div class="btns">${btns}</div>` : ''}`;
+  if (el._html === html) return;            // 1초마다 불리지만 내용이 같으면 그대로 둔다(버튼을 누르는 중에 요소가 바뀌지 않게)
+  el._html = html; el.innerHTML = html;
+  el.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => ({
+    yes: () => answer(true), no: () => answer(false), ack: () => { S.acked = m.seq; render(); },
+    end: () => api('POST', `/api/pickups/${p.pickupId}/status`, { status: 'ENDED' }).then(onSnap),
+    cancel: () => api('POST', `/api/pickups/${p.pickupId}/status`, { status: 'CANCELLED' }).then(onSnap),
+  }[b.dataset.a]()));
+}
+function renderHome(el) {
+  el._html = null;
+  const ms = S.me?.members ?? [];
+  if (S.gear === 'D') { el.className = 'parked'; el.innerHTML = `<div class="head big">${APPICON}마중<i>주행 중</i></div><div class="card grow qr"><p class="ln">가족 선택과 QR 연결은 주차 중에만 할 수 있어요.</p></div>`; return; }
+  el.className = 'parked';
+  el.innerHTML = `<div class="head big">${APPICON}마중<i>${S.offline ? '연결 끊김' : '주차 중'}</i></div>
+    ${ms.length ? `<div class="card" style="padding:16px 48px">${ms.map((m, i) => { const d = m.spots.find((s) => s.isDefault) ?? m.spots[0];
+      return `${i ? '<div class="rule" style="margin:0"></div>' : ''}<div class="person"><div><h3>${esc(m.name)}</h3><p>만남 지점 · ${esc(d?.name ?? '픽업 때 정해요')}</p></div><button class="sm" data-m="${i}">픽업</button></div>`; }).join('')}</div>` : ''}
+    <div class="card grow qr"><div id="qrbox"></div><div><h3 style="margin:0;font-size:36px">가족 추가</h3><p class="ln" style="font-size:28px;margin-top:8px">가족 휴대폰으로 QR을 찍으면 바로 등록돼요.</p></div></div>`;
+  if (S.invite) new QRCode($('qrbox'), { text: S.invite, width: 232, height: 232, colorDark: '#131417', colorLight: '#edeef2' });
+  el.querySelectorAll('[data-m]').forEach((b) => b.onclick = () => { S.confirming = ms[b.dataset.m]; S.selected = (S.confirming.spots.find((s) => s.isDefault) ?? S.confirming.spots[0])?.spotId ?? null; render(); });
+}
+function renderConfirm(el) {
+  el._html = null;
+  const m = S.confirming, opts = [...m.spots.map((s) => [s.spotId, s.name + (s.isDefault ? ' · 기본' : '')]), [null, `${m.name}에게 물어보기`]];
+  const sel = m.spots.find((s) => s.spotId === S.selected);
+  const eta = sel ? `<div class="card eta">${ic(CLOCK)}<p class="ln">도착 예정</p><b>${Math.max(1, Math.round(dist(S.pos, sel) / 8 / 60))}분</b></div>` : '';
+  el.className = 'depth';
+  el.innerHTML = `<div class="title"><button class="back" id="back" aria-label="뒤로">${ic(BACK, 56)}</button>${esc(m.name)} 픽업</div><div class="pad">
+    <div class="card" style="padding:40px 48px;gap:8px"><p class="ln" style="font-size:26px;line-height:34px;color:var(--t3)">만남 지점</p>
+    ${opts.map(([id, label], i) => `${i ? '<div class="rule" style="margin:0"></div>' : ''}<div class="radio ${S.selected === id ? 'on' : ''}" data-i="${i}"><u></u>${esc(label)}</div>`).join('')}</div>
+    ${eta}<div class="grow"></div><div class="btns"><button class="fill" id="go">안내 시작</button></div></div>`;
+  $('back').onclick = () => { S.confirming = null; render(); };
+  el.querySelectorAll('[data-i]').forEach((r) => r.onclick = () => { S.selected = opts[r.dataset.i][0]; render(); });
+  $('go').onclick = async () => {
+    const body = { memberId: m.memberId }; if (S.selected) body.spotId = S.selected;
+    const p = await api('POST', '/api/pickups', body); S.confirming = null; onSnap(p); poll(p.pickupId);
+  };
+}
+
+// ── 모의 버추얼 콘솔 ──
+function setGear(g) { S.gear = g; $('gearP').classList.toggle('on', g === 'P'); $('gearD').classList.toggle('on', g === 'D'); if (g === 'D') depart(); render(); }
+$('gearP').onclick = () => setGear('P'); $('gearD').onclick = () => setGear('D');
+$('hz').onclick = () => { S.hazard = !S.hazard; $('hz').classList.toggle('on', S.hazard); render(); };
+
+async function refreshMe() {
+  try {
+    const before = JSON.stringify([S.me?.members, S.offline]);
+    S.me = await api('GET', '/api/cars/me'); S.offline = false;
+    if (S.me.activePickupId && !S.p) poll(S.me.activePickupId);
+    if (!S.p && JSON.stringify([S.me.members, S.offline]) !== before) render();     // 바뀐 게 없으면 다시 그리지 않는다
+  } catch (e) { if (e.status === 401) { localStorage.removeItem('majung.car'); location.reload(); } if (!S.offline) { S.offline = true; if (!S.p) render(); } }
+}
+async function boot() {
+  if (!token) { const c = await api('POST', '/api/cars', { alias: '회색 SUV' }); token = c.carToken; localStorage.setItem('majung.car', token); }
+  await refreshMe();
+  S.invite = (await api('POST', '/api/invites')).url;
+  parent?.postMessage({ majungInvite: S.invite }, location.origin);
+  drawNav(); render();
+  setInterval(() => { if (!S.p && !S.confirming) refreshMe(); }, 3000);   // QR 로 연결된 가족이 목록에 나타나게
+}
+const fit = () => { const k = Math.min(innerWidth / 2560, innerHeight / 1440); $('stage').style.transform = `scale(${k})`; $('stage').style.left = (innerWidth - 2560 * k) / 2 + 'px'; $('stage').style.top = (innerHeight - 1440 * k) / 2 + 'px'; map.invalidateSize(); };
+addEventListener('resize', fit); fit(); boot();
+</script>
+</body>
+</html>

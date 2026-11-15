@@ -33,7 +33,7 @@ rl.on('line', (line) => {
 const listen = (ms) => new Promise((res) => { const t = setTimeout(() => { pendingAnswer = null; res('none'); }, ms); pendingAnswer = (a) => { clearTimeout(t); pendingAnswer = null; res(a); }; });
 
 // 1) 차량 등록 + 초대
-const car = await api('POST', '/api/cars', { alias: '회색 SUV' }); token = car.carToken;
+const car = await api('POST', '/api/cars', { alias: '회색 SUV', demoMember: false }); token = car.carToken;
 const inv = await api('POST', '/api/invites');
 console.log(`\n휴대폰(또는 브라우저)에서 이 주소를 여세요:\n  ${inv.url}\n`);
 

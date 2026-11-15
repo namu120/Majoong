@@ -18,7 +18,7 @@ const B = { name: '수학학원 후문', lat: 37.4984, lng: 127.0281, memo: '회
 let car, member, pid;
 
 before(async () => {
-  car = (await call('POST', '/api/cars', null, { alias: '회색 SUV' })).body;
+  car = (await call('POST', '/api/cars', null, { alias: '회색 SUV', demoMember: false })).body;
   const inv = (await call('POST', '/api/invites', car.carToken)).body;
   assert.equal((await call('POST', `/api/invites/${inv.inviteToken}/accept`, null, { name: '첫째' })).status, 400, '동의 없이는 연결되지 않는다');
   member = (await call('POST', `/api/invites/${inv.inviteToken}/accept`, null, { name: '첫째', consent: true })).body;

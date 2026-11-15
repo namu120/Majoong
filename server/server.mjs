@@ -76,7 +76,15 @@ const open = (p) => { if (TERMINAL.includes(p.status)) bad(409, 'pickup_closed')
 // 차량 등록 (앱 최초 실행 시 1회)
 route('POST', '/api/cars', null, (_, b) => {
   const car = { carId: id(6), token: id(24), alias: String(b.alias ?? '우리 차').slice(0, 20), members: [] };
-  db.cars[car.carId] = car; tokens.set(car.token, { kind: 'car', id: car.carId }); persist();
+  db.cars[car.carId] = car; tokens.set(car.token, { kind: 'car', id: car.carId });
+  // 예시 가족 1명: 휴대폰으로 QR 을 찍지 않아도 차량 앱에서 픽업을 바로 시작해 볼 수 있게 한다.
+  // 끄려면 DEMO_MEMBER=0 으로 실행하거나 등록 요청에 demoMember:false 를 넣는다(웹 시연 페이지·테스트가 그렇게 한다).
+  if (process.env.DEMO_MEMBER !== '0' && b.demoMember !== false) {
+    const m = { memberId: id(6), token: id(24), carId: car.carId, name: '예시 가족', joinedAt: now(),
+      spots: [{ spotId: id(6), name: '학원 정문 앞', lat: 37.4969, lng: 127.0278, memo: '정문 오른쪽 편의점 앞', isDefault: true }] };
+    db.members[m.memberId] = m; car.members.push(m.memberId); tokens.set(m.token, { kind: 'member', id: m.memberId });
+  }
+  persist();
   return { carId: car.carId, carToken: car.token, alias: car.alias };
 });
 // 초대 QR 발급 (주차 중에만 호출)

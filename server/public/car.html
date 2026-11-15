@@ -321,7 +321,7 @@ async function refreshMe() {
   } catch (e) { if (e.status === 401) { localStorage.removeItem('majung.car'); location.reload(); } if (!S.offline) { S.offline = true; if (!S.p) render(); } }
 }
 async function boot() {
-  if (!token) { const c = await api('POST', '/api/cars', { alias: '회색 SUV' }); token = c.carToken; localStorage.setItem('majung.car', token); }
+  if (!token) { const c = await api('POST', '/api/cars', { alias: '회색 SUV', demoMember: false }); token = c.carToken; localStorage.setItem('majung.car', token); }
   await refreshMe();
   S.invite = (await api('POST', '/api/invites')).url;
   parent?.postMessage({ majungInvite: S.invite }, location.origin);

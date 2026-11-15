@@ -76,7 +76,19 @@ Pleos Connect SDK는 `https://nexus-playground.pleos.ai/repository/maven-release
 
 `apk/마중_마중_release.apk` — 서명된 release 빌드입니다(minSdk 28, targetSdk 34).
 
-- 위 "에뮬레이터에서 확인한 것"은 같은 소스의 debug 빌드로 확인했습니다. 이 release 파일 자체를 설치해 다시 확인하지는 않았습니다.
+- 위 "에뮬레이터에서 확인한 것"은 같은 소스의 debug 빌드로 확인했습니다. 이 release 파일은 에뮬레이터에 설치해 실행, 서버 연결, 가족 목록과 픽업 시작 화면까지 확인했습니다.
+
+### APK를 직접 실행해 보려면
+
+Pleos Connect 에뮬레이터와 Node(18 이상)가 있는 PC 한 대면 됩니다. 휴대폰은 없어도 됩니다.
+
+1. PC에서 서버를 켭니다: `cd server && node server.mjs`
+2. 에뮬레이터에 APK를 설치합니다: `adb install apk/마중_마중_release.apk`
+3. 앱을 열고 위치·알림 권한을 허용합니다.
+4. 서버가 차량을 등록할 때 **예시 가족 1명**(만남 지점 포함)을 함께 넣어 두므로, QR을 찍지 않아도 바로 "예시 가족"을 골라 픽업을 시작할 수 있습니다.
+
+실제 휴대폰으로 가족을 추가하려면 휴대폰을 PC와 같은 Wi-Fi에 두고 앱의 QR을 찍습니다. 예시 가족 없이 실행하려면 `DEMO_MEMBER=0 node server.mjs` 로 켭니다.
+
 - 첫 실행 때 위치 권한(`pleos.car.permission.FUSED_LOCATION`) 허용을 묻습니다. 허용해야 차량 위치가 공유됩니다.
 - 서버 주소는 `http://10.0.2.2:8787`(에뮬레이터에서 본 개발 PC)로 빌드되어 있습니다. 실행하려면 개발 PC에서 `server/server.mjs`를 먼저 켭니다.
 - 차량 신호는 방향지시등과 기어(P 여부)만 연결했습니다. 비상등은 SDK에 전용 API가 없어 연결하지 않았고, 도어·좌석 신호를 이용한 종료 제안은 아직 구현하지 않았습니다(수동 "탑승 종료"로 동작).
